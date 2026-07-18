@@ -127,14 +127,6 @@ export async function countUnreadNotifications(visibleToOwnerOnly: boolean): Pro
   return NotificationModel.countDocuments(match);
 }
 
-/** Section 7.6/1.3 — the bell's dropdown, audience-scoped, newest first. */
-export async function findRecentNotifications(visibleToOwnerOnly: boolean, limit: number) {
-  await db();
-  const match: Record<string, unknown> = {};
-  if (!visibleToOwnerOnly) match.audience = "all";
-  return NotificationModel.find(match).sort({ createdAt: -1, _id: -1 }).limit(limit).lean();
-}
-
 export async function markNotificationRead(id: string) {
   await db();
   if (!Types.ObjectId.isValid(id)) return;

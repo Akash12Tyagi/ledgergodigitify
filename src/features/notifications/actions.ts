@@ -19,13 +19,6 @@ export async function listNotificationsAction(
   });
 }
 
-export async function getBellFeedAction(): Promise<ApiResult<Awaited<ReturnType<typeof notificationsService.getBellFeed>>>> {
-  return runAction(async () => {
-    const actor = await requireUser("viewer");
-    return notificationsService.getBellFeed(actor.role);
-  });
-}
-
 export async function markNotificationReadAction(id: string): Promise<ApiResult<null>> {
   return runAction(async () => {
     await checkRateLimit("mutation", "markNotificationRead");

@@ -5,7 +5,6 @@ import {
   createNotificationIfNotExists,
   findNotificationByDedupeKey,
   findNotificationsPaginated,
-  findRecentNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   markUnreadNotificationsReadByEntity,
@@ -77,25 +76,11 @@ export async function getUnreadCount(role: UserRole): Promise<number> {
   return countUnreadNotifications(visibleToOwnerOnly(role));
 }
 
-/** Section 1.3 — the topbar bell's poll payload. */
-export async function getBellFeed(role: UserRole, limit = 8) {
-  const [unreadCount, recent] = await Promise.all([
-    getUnreadCount(role),
-    findRecentNotifications(visibleToOwnerOnly(role), limit),
-  ]);
-  return {
-    unreadCount,
-    recent: recent.map((n) => ({
-      id: n._id.toString(),
-      type: n.type,
-      severity: n.severity,
-      title: n.title,
-      body: n.body,
-      href: n.href,
-      isRead: n.isRead,
-      createdAt: n.createdAt.toISOString(),
-    })),
-  };
+/** Section 1.3 — the topbar bell's poll payload. The bell is a direct link
+ * to /notifications (not a preview dropdown), so this only needs the
+ * unread count — no separate "recent" list to fetch. */
+export async function getBellFeed(role: UserRole): Promise<{ unreadCount: number }> {
+  return { unreadCount: await getUnreadCount(role) };
 }
 
 export async function markRead(id: string) {
