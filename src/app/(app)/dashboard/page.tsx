@@ -10,7 +10,7 @@ import { ReconciliationBanner } from "@/components/shared/ReconciliationBanner";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SparklineChartLazy } from "@/components/shared/charts/SparklineChartLazy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboardData } from "@/server/services/financial-engine";
+import { getDashboardData, getEarliestActivityMonthKey } from "@/server/services/financial-engine";
 import { getSettings } from "@/server/services/settings.service";
 import { requireUser } from "@/server/auth/guards";
 import { MONTH_COOKIE, resolveMonthKey } from "@/lib/month-context";
@@ -38,7 +38,12 @@ export default async function DashboardPage() {
 
   const [data, settings] = await Promise.all([getDashboardData(monthKey), getSettings()]);
   const { overview } = data;
-  const minMonthKey = settings.goLiveDate ? toMonthKey(settings.goLiveDate) : undefined;
+  // Task 2 — lower bound is the configured go-live date, falling back to
+  // the company's actual first financial record when none is set, so the
+  // picker never floors at an arbitrary/unbounded default.
+  const minMonthKey = settings.goLiveDate
+    ? toMonthKey(settings.goLiveDate)
+    : ((await getEarliestActivityMonthKey()) ?? undefined);
 
   return (
     <div>

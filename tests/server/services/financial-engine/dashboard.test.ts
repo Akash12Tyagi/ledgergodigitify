@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getDashboardData } from "@/server/services/financial-engine";
+import { getDashboardData, getEarliestActivityMonthKey } from "@/server/services/financial-engine";
 import { seedAccount, seedTransaction } from "../../../helpers/seed-financial";
 import { seedUser, clearAllCollections } from "../../../helpers/seed-user";
 
@@ -46,6 +46,42 @@ describe("getDashboardData", () => {
     expect(data.duesThisWeek).toEqual([]);
   });
 
+  it("scopes recentActivity to the requested monthKey — a historical month never shows another month's transactions (Task 2)", async () => {
+    const owner = await seedUser({
+      name: "OwnerMonth",
+      email: `dashmonth-${Date.now()}@example.com`,
+      password: "Correct-Horse-Battery-Staple-9",
+      role: "owner",
+    });
+    const account = await seedAccount({ openingBalancePaise: 0, currentBalancePaise: 0 });
+
+    await seedTransaction(owner._id, {
+      type: "PAYMENT_IN",
+      direction: "IN",
+      accountId: account._id,
+      amountPaise: 5_000_00,
+      monthKey: "2026-06",
+      occurredAt: new Date("2026-06-10T06:00:00.000Z"),
+    });
+    await seedTransaction(owner._id, {
+      type: "EXPENSE_OUT",
+      direction: "OUT",
+      accountId: account._id,
+      amountPaise: 1_000_00,
+      monthKey: "2026-07",
+      occurredAt: new Date("2026-07-10T06:00:00.000Z"),
+    });
+
+    const june = await getDashboardData("2026-06");
+    expect(june.recentActivity).toHaveLength(1);
+    expect(june.recentActivity[0]?.amountPaise).toBe(5_000_00);
+
+    const july = await getDashboardData("2026-07");
+    expect(july.recentActivity).toHaveLength(1);
+    expect(july.recentActivity[0]?.amountPaise).toBe(1_000_00);
+    expect(july.recentActivity[0]?.direction).toBe("OUT");
+  });
+
   it("flags an account as low-balance when currentBalancePaise is under its threshold", async () => {
     await seedAccount({
       name: "Low Cash Box",
@@ -56,5 +92,46 @@ describe("getDashboardData", () => {
 
     const data = await getDashboardData("2026-07");
     expect(data.accounts[0]?.isLowBalance).toBe(true);
+  });
+});
+
+// Task 2 — the Dashboard month picker's lower bound: go-live date, falling
+// back to the company's first financial record when unset.
+describe("getEarliestActivityMonthKey", () => {
+  afterEach(async () => {
+    await clearAllCollections();
+  });
+
+  it("returns null when there is no activity yet", async () => {
+    expect(await getEarliestActivityMonthKey()).toBeNull();
+  });
+
+  it("returns the monthKey of the oldest active transaction, ignoring reversed ones", async () => {
+    const owner = await seedUser({
+      name: "OwnerEarliest",
+      email: `earliest-${Date.now()}@example.com`,
+      password: "Correct-Horse-Battery-Staple-9",
+      role: "owner",
+    });
+    const account = await seedAccount({ openingBalancePaise: 0, currentBalancePaise: 0 });
+
+    await seedTransaction(owner._id, {
+      accountId: account._id,
+      monthKey: "2026-03",
+      occurredAt: new Date("2026-03-15T00:00:00.000Z"),
+    });
+    await seedTransaction(owner._id, {
+      accountId: account._id,
+      monthKey: "2026-05",
+      occurredAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    await seedTransaction(owner._id, {
+      accountId: account._id,
+      monthKey: "2026-01",
+      occurredAt: new Date("2026-01-01T00:00:00.000Z"),
+      status: "reversed",
+    });
+
+    expect(await getEarliestActivityMonthKey()).toBe("2026-03");
   });
 });

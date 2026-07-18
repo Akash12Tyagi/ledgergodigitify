@@ -268,12 +268,24 @@ export async function sumByTypeGroupedByMonth(
  * there, not on the transaction) — see expenses.repository.ts. This file
  * only aggregates the ledger itself. */
 
-export async function findRecentTransactions(limit: number) {
+/** Dashboard "Recent Activity" — scoped to the selected monthKey so
+ * navigating to a historical month doesn't silently keep showing today's
+ * transactions (Task 2: every dashboard widget must refresh for the
+ * selected month). */
+export async function findRecentTransactions(monthKey: string, limit: number) {
   await db();
-  return TransactionModel.find({ status: "active" })
+  return TransactionModel.find({ status: "active", monthKey })
     .sort({ occurredAt: -1, _id: -1 })
     .limit(limit)
     .lean();
+}
+
+/** Task 2 — the Dashboard month picker's lower bound falls back to the
+ * company's first financial record when no `settings.goLiveDate` is
+ * configured (dashboard/page.tsx). */
+export async function findEarliestTransaction() {
+  await db();
+  return TransactionModel.findOne({ status: "active" }).sort({ occurredAt: 1, _id: 1 }).lean();
 }
 
 function buildTxMatch(filter: TxFilter): Record<string, unknown> {

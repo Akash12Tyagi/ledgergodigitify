@@ -1,5 +1,5 @@
 import { AppError } from "@/lib/errors";
-import { daysOverdue as computeDaysOverdue, monthKeyToRange, shiftMonthKey, todayIST } from "@/lib/dates";
+import { daysOverdue as computeDaysOverdue, monthKeyToRange, shiftMonthKey, todayIST, toMonthKey } from "@/lib/dates";
 import {
   findAccountById,
   findAccountsByIds,
@@ -16,6 +16,7 @@ import { sumExpensesByCategoryInRange } from "@/server/repositories/expenses.rep
 import { getSettingsOrDefaults } from "@/server/repositories/settings.repository";
 import {
   findAccountActivityPage,
+  findEarliestTransaction,
   findRecentTransactions,
   findTransactionsPaginated,
   sumByTypeAndMonth,
@@ -593,6 +594,14 @@ function previousMonthKeys(monthKey: string, count: number): string[] {
   return keys;
 }
 
+/** Task 2 — Dashboard month picker lower bound: "first financial record
+ * (or go-live date if configured)". Callers (dashboard/page.tsx) use
+ * `settings.goLiveDate` first and only fall back to this when it's unset. */
+export async function getEarliestActivityMonthKey(): Promise<string | null> {
+  const earliest = await findEarliestTransaction();
+  return earliest ? toMonthKey(earliest.occurredAt) : null;
+}
+
 export async function getDashboardData(monthKey: string): Promise<DashboardData> {
   const sparklineMonths = previousMonthKeys(monthKey, 6);
 
@@ -600,7 +609,7 @@ export async function getDashboardData(monthKey: string): Promise<DashboardData>
     getMonthOverview(monthKey),
     getDuesList(todayIST()),
     findAllActiveAccounts(),
-    findRecentTransactions(8),
+    findRecentTransactions(monthKey, 8),
     sumByTypeGroupedByMonth(sparklineMonths, ["PAYMENT_IN"]),
     sumByTypeGroupedByMonth(sparklineMonths, ["EXPENSE_OUT"]),
   ]);
