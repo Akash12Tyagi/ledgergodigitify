@@ -1,0 +1,56 @@
+// Section 13 — the closed list of audit action strings. Use exactly these;
+// audit.service rejects anything else at compile time via the union type.
+export const AUDIT_ACTIONS = [
+  "CLIENT_CREATED",
+  "CLIENT_UPDATED",
+  "CLIENT_PAUSED",
+  "CLIENT_RESUMED",
+  "CLIENT_ARCHIVED",
+  "CLIENT_UNARCHIVED",
+  "PAYMENT_RECORDED",
+  "PAYMENT_REVERSED",
+  "EXPENSE_CREATED",
+  "EXPENSE_REVERSED",
+  "CREDIT_CREATED",
+  "CREDIT_REVERSED",
+  "TRANSFER_CREATED",
+  "TRANSFER_REVERSED",
+  "ACCOUNT_CREATED",
+  "ACCOUNT_UPDATED",
+  "ACCOUNT_ARCHIVED",
+  "ACCOUNT_OPENING_BALANCE_CHANGED",
+  "ACCOUNT_DEFAULT_CHANGED",
+  "BILLING_GENERATED",
+  "SETTINGS_UPDATED",
+  "RECONCILE_RUN",
+  "RECONCILE_DRIFT_DETECTED",
+  "RECONCILE_RESOLVED",
+  "USER_CREATED",
+  "USER_ROLE_CHANGED",
+  "USER_DEACTIVATED",
+  "USER_REACTIVATED",
+  "PASSWORD_CHANGED",
+  "PROFILE_UPDATED",
+  "LOGIN",
+  "LOGIN_FAILED",
+  "LOGOUT",
+  "EXPORT_GENERATED",
+  "CRON_RUN",
+] as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+export const AUDIT_ENTITY_KINDS = [
+  "client",
+  "payment",
+  "expense",
+  "credit",
+  "account",
+  "transfer",
+  "user",
+  "settings",
+  "auth",
+  "system",
+] as const;
+
+export type AuditEntityKind = (typeof AUDIT_ENTITY_KINDS)[number];

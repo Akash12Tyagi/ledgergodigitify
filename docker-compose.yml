@@ -1,0 +1,23 @@
+services:
+  # Local development stand-in for the Atlas replica set (Section 2.3). A
+  # single-node replica set is required — not a standalone mongod — because
+  # Law 4 relies on multi-document transactions, which only work on a
+  # replica set. Production still targets Atlas ap-south-1 (Section 17.1);
+  # this container is dev-only and never used for staging/production.
+  mongo:
+    image: mongo:7
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: |
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'127.0.0.1:27017'}]}).ok }"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  mongo-data:
