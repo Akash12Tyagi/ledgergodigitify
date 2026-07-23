@@ -280,6 +280,20 @@ export async function findRecentTransactions(monthKey: string, limit: number) {
     .lean();
 }
 
+/** Range-scoped sibling of findRecentTransactions, for the Dashboard's
+ * From–To picker. "YYYY-MM" sorts correctly under plain string comparison
+ * (same convention as sumInOutByAccountBeforeMonth), so no date parsing. */
+export async function findRecentTransactionsInRange(fromMonthKey: string, toMonthKey: string, limit: number) {
+  await db();
+  return TransactionModel.find({
+    status: "active",
+    monthKey: { $gte: fromMonthKey, $lte: toMonthKey },
+  })
+    .sort({ occurredAt: -1, _id: -1 })
+    .limit(limit)
+    .lean();
+}
+
 /** Task 2 — the Dashboard month picker's lower bound falls back to the
  * company's first financial record when no `settings.goLiveDate` is
  * configured (dashboard/page.tsx). */

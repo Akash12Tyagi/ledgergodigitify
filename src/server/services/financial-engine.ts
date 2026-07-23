@@ -18,6 +18,7 @@ import {
   findAccountActivityPage,
   findEarliestTransaction,
   findRecentTransactions,
+  findRecentTransactionsInRange,
   findTransactionsPaginated,
   sumByTypeAndMonth,
   sumByTypeGroupedByMonth,
@@ -646,6 +647,65 @@ export async function getDashboardData(monthKey: string): Promise<DashboardData>
 
   return {
     monthKey: monthKey as MonthKey,
+    overview,
+    dues,
+    accounts: accountStrip,
+    duesThisWeek,
+    recentActivity,
+    sparkline,
+  };
+}
+
+/** From–To range sibling of getDashboardData, for the Dashboard's range
+ * picker. `overview` sums flows across the whole range (getRangeOverview);
+ * dues/accounts stay today-relative snapshots exactly as in the
+ * single-month case (Section 4.2 — overdue/outstanding/live balances are
+ * never a function of the browsed period). The sparkline still trails 6
+ * months back from `toMonthKey` regardless of `fromMonthKey`, matching the
+ * single-month behavior of "last 6 months ending here". When from === to
+ * this returns the exact same figures as getDashboardData(to). */
+export async function getDashboardRangeData(fromMonthKey: string, toMonthKey: string): Promise<DashboardData> {
+  const sparklineMonths = previousMonthKeys(toMonthKey, 6);
+
+  const [overview, dues, accounts, recentTx, collectedSeries, expenseSeries] = await Promise.all([
+    getRangeOverview(fromMonthKey, toMonthKey),
+    getDuesList(todayIST()),
+    findAllActiveAccounts(),
+    findRecentTransactionsInRange(fromMonthKey, toMonthKey, 8),
+    sumByTypeGroupedByMonth(sparklineMonths, ["PAYMENT_IN"]),
+    sumByTypeGroupedByMonth(sparklineMonths, ["EXPENSE_OUT"]),
+  ]);
+
+  const settings = await getSettingsOrDefaults();
+
+  const accountsWithNames = new Map(accounts.map((a) => [a._id.toString(), a.name]));
+  const recentActivity: TxRow[] = recentTx.map((doc) =>
+    activityDocToRow(doc as unknown as Record<string, unknown>, accountsWithNames)
+  );
+
+  const accountStrip: AccountStripItem[] = accounts.map((a) => {
+    const threshold = a.lowBalanceThresholdPaise ?? settings.lowBalanceDefaultPaise;
+    return {
+      accountId: a._id.toString(),
+      name: a.name,
+      balancePaise: a.currentBalancePaise,
+      lowBalanceThresholdPaise: threshold,
+      isLowBalance: a.currentBalancePaise < threshold,
+    };
+  });
+
+  const sparkline: SparklinePoint[] = sparklineMonths.map((mk) => ({
+    monthKey: mk as MonthKey,
+    collectedPaise: collectedSeries.get(mk) ?? 0,
+    expensesPaise: expenseSeries.get(mk) ?? 0,
+  }));
+
+  const duesThisWeek = [...dues.overdue, ...dues.dueSoon]
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+    .slice(0, 6);
+
+  return {
+    monthKey: toMonthKey as MonthKey,
     overview,
     dues,
     accounts: accountStrip,

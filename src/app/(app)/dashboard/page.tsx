@@ -5,15 +5,15 @@ import { cookies } from "next/headers";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DrilldownCard } from "@/components/shared/DrilldownCard";
 import { AmountText } from "@/components/shared/AmountText";
-import { MonthPicker } from "@/components/shared/MonthPicker";
+import { DashboardRangePicker } from "@/components/shared/DashboardRangePicker";
 import { ReconciliationBanner } from "@/components/shared/ReconciliationBanner";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SparklineChartLazy } from "@/components/shared/charts/SparklineChartLazy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboardData, getEarliestActivityMonthKey } from "@/server/services/financial-engine";
+import { getDashboardRangeData } from "@/server/services/financial-engine";
 import { getSettings } from "@/server/services/settings.service";
 import { requireUser } from "@/server/auth/guards";
-import { MONTH_COOKIE, resolveMonthKey } from "@/lib/month-context";
+import { DASHBOARD_FROM_COOKIE, DASHBOARD_TO_COOKIE, resolveDashboardRange } from "@/lib/dashboard-range-context";
 import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
 import type { AccountStripItem, DueRow, TxRow } from "@/types/engine";
@@ -29,27 +29,46 @@ import type { AccountStripItem, DueRow, TxRow } from "@/types/engine";
 export const metadata: Metadata = { title: "Dashboard — Finance & Ledger" };
 export const dynamic = "force-dynamic";
 
-// Section 7.1/1.3 Flow B — ONE composed call (getDashboardData), internals
-// parallelized (Section 9). Money math never happens client-side.
+// Section 7.1/1.3 Flow B — ONE composed call (getDashboardRangeData),
+// internals parallelized (Section 9). Money math never happens client-side.
 export default async function DashboardPage() {
   await requireUser("viewer");
   const cookieStore = await cookies();
-  const monthKey = resolveMonthKey(cookieStore.get(MONTH_COOKIE)?.value, toMonthKey(nowIST()));
+  const currentRealMonth = toMonthKey(nowIST());
+  const { from: fromMonthKey, to: toMonthKeyValue } = resolveDashboardRange(
+    cookieStore.get(DASHBOARD_FROM_COOKIE)?.value,
+    cookieStore.get(DASHBOARD_TO_COOKIE)?.value,
+    currentRealMonth
+  );
 
-  const [data, settings] = await Promise.all([getDashboardData(monthKey), getSettings()]);
+  const [data, settings] = await Promise.all([
+    getDashboardRangeData(fromMonthKey, toMonthKeyValue),
+    getSettings(),
+  ]);
   const { overview } = data;
-  // Task 2 — lower bound is the configured go-live date, falling back to
-  // the company's actual first financial record when none is set, so the
-  // picker never floors at an arbitrary/unbounded default.
-  const minMonthKey = settings.goLiveDate
-    ? toMonthKey(settings.goLiveDate)
-    : ((await getEarliestActivityMonthKey()) ?? undefined);
+  // The picker's only lower bound is an explicitly configured go-live date
+  // (Settings). Without one, users can browse back to any previous month —
+  // there is no implicit floor at "the earliest transaction on record",
+  // since that silently blocks navigation for any company whose ledger
+  // history is still short (everything shows ₹0 for empty months, which is
+  // correct, not broken).
+  const minMonthKey = settings.goLiveDate ? toMonthKey(settings.goLiveDate) : undefined;
+  const rangeLabel =
+    fromMonthKey === toMonthKeyValue
+      ? formatMonthLabel(toMonthKeyValue)
+      : `${formatMonthLabel(fromMonthKey)} – ${formatMonthLabel(toMonthKeyValue)}`;
 
   return (
     <div>
       <PageHeader
         title="Dashboard"
-        action={<MonthPicker monthKey={monthKey} minMonthKey={minMonthKey} />}
+        action={
+          <DashboardRangePicker
+            fromMonthKey={fromMonthKey}
+            toMonthKey={toMonthKeyValue}
+            minMonthKey={minMonthKey}
+          />
+        }
       />
 
       {overview.reconciliationError ? (
@@ -74,16 +93,16 @@ export default async function DashboardPage() {
               tone={overview.overduePaise > 0 ? "danger" : "neutral"}
             />
             <DrilldownCard
-              label={`Collected — ${formatMonthLabel(monthKey)}`}
+              label={`Collected — ${rangeLabel}`}
               value={formatINR(overview.collectedPaise)}
               href={`/ledger/overview?type=PAYMENT_IN`}
-              ariaLabel={`View payments collected this month, totalling ${formatINR(overview.collectedPaise)}`}
+              ariaLabel={`View payments collected in this period, totalling ${formatINR(overview.collectedPaise)}`}
             />
             <DrilldownCard
-              label={`Expenses — ${formatMonthLabel(monthKey)}`}
+              label={`Expenses — ${rangeLabel}`}
               value={formatINR(overview.expensesPaise)}
               href={`/ledger/overview?type=EXPENSE_OUT`}
-              ariaLabel={`View expenses this month, totalling ${formatINR(overview.expensesPaise)}`}
+              ariaLabel={`View expenses in this period, totalling ${formatINR(overview.expensesPaise)}`}
               tone={overview.expensesPaise > 0 ? "warn" : "neutral"}
             />
           </div>
