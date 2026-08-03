@@ -4,11 +4,13 @@ import {
   archiveClient,
   checkClientName,
   createClient,
+  getClientsListView,
   pauseClient,
   resumeClient,
   unarchiveClient,
   updateClient,
 } from "@/server/services/clients.service";
+import { countClientsFiltered } from "@/server/repositories/clients.repository";
 import { findBillingByClientAndMonth } from "@/server/repositories/monthly-billings.repository";
 import { AuditLogModel } from "@/database/models/audit-log.model";
 import { seedUser, clearAllCollections } from "../../helpers/seed-user";
@@ -185,5 +187,43 @@ describe("clients.service", () => {
       "CLIENT_ARCHIVED",
       "CLIENT_UNARCHIVED",
     ]);
+  });
+
+  // Section 15/M8 hardening pass — pagination pushed down to Mongo
+  // (skip/limit) instead of getClientsListView fetching every filtered
+  // client and slicing in memory.
+  it("getClientsListView pages the filtered roster instead of returning everything", async () => {
+    const owner = await seedUser({
+      name: "OwnerPaged",
+      email: `cs-paged-${Date.now()}@example.com`,
+      password: "Correct-Horse-Battery-Staple-9",
+      role: "owner",
+    });
+    const actor = actorFrom(owner);
+
+    const names = ["Alpha Co", "Bravo Co", "Charlie Co", "Delta Co", "Echo Co"];
+    for (const name of names) {
+      await createClient(
+        {
+          name,
+          service: "Bookkeeping",
+          engagementType: "retainer",
+          amountPaise: 10_000_00,
+          nextDueDate: new Date("2026-07-15T00:00:00.000Z"),
+        },
+        actor
+      );
+    }
+
+    const total = await countClientsFiltered({ status: "active" });
+    expect(total).toBe(5);
+
+    const page1 = await getClientsListView({ status: "active" }, "2026-07", 1, 2);
+    const page2 = await getClientsListView({ status: "active" }, "2026-07", 2, 2);
+    const page3 = await getClientsListView({ status: "active" }, "2026-07", 3, 2);
+
+    expect(page1.map((r) => r.name)).toEqual(["Alpha Co", "Bravo Co"]);
+    expect(page2.map((r) => r.name)).toEqual(["Charlie Co", "Delta Co"]);
+    expect(page3.map((r) => r.name)).toEqual(["Echo Co"]);
   });
 });

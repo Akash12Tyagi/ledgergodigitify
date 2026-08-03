@@ -120,8 +120,7 @@ export async function findActiveRetainerClients() {
   return ClientModel.find({ status: "active", engagementType: "retainer" }).lean();
 }
 
-export async function findClientsFiltered(filter: ClientListFilter) {
-  await db();
+function buildClientMatch(filter: ClientListFilter): Record<string, unknown> {
   const match: Record<string, unknown> = {};
   if (filter.status && filter.status !== "all") match.status = filter.status;
   else if (!filter.status) match.status = "active"; // Section 7.2 default
@@ -131,5 +130,28 @@ export async function findClientsFiltered(filter: ClientListFilter) {
   if (filter.search?.trim()) {
     match.$text = { $search: filter.search.trim() };
   }
-  return ClientModel.find(match).sort({ name: 1 }).lean();
+  return match;
+}
+
+/** Section 15/M8 hardening pass — `page`/`pageSize` push pagination down to
+ * Mongo (skip/limit) instead of the caller fetching every filtered client
+ * and slicing in memory, so getClientsListView only pays its per-client
+ * enrichment cost (Section 7.2) for the rows actually shown. */
+export async function findClientsFiltered(
+  filter: ClientListFilter,
+  page?: number,
+  pageSize?: number
+) {
+  await db();
+  const match = buildClientMatch(filter);
+  const query = ClientModel.find(match).sort({ name: 1 });
+  if (page && pageSize) {
+    query.skip((page - 1) * pageSize).limit(pageSize);
+  }
+  return query.lean();
+}
+
+export async function countClientsFiltered(filter: ClientListFilter): Promise<number> {
+  await db();
+  return ClientModel.countDocuments(buildClientMatch(filter));
 }

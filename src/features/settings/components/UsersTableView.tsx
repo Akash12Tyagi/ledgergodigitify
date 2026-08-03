@@ -4,7 +4,7 @@ import { DataTable } from "@/components/shared/DataTable";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { CreateUserDialog } from "@/features/settings/components/CreateUserDialog";
 import { buildUsersColumns } from "@/features/settings/components/users-columns";
-import type { UserRow } from "@/features/settings/actions";
+import type { UserRow } from "@/server/services/settings.service";
 
 export function UsersTableView({ users, currentUserId }: { users: UserRow[]; currentUserId: string }) {
   return (

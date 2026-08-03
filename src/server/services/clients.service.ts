@@ -186,26 +186,20 @@ export async function unarchiveClient(clientId: string, actor: AuthedUser) {
   });
 }
 
-export async function getClientTotalDueForArchiveWarning(clientId: string) {
-  return getClientTotalDue(clientId);
-}
-
-export async function listClients(filter: ClientListFilter) {
-  return findClientsFiltered(filter);
-}
-
 /**
  * Section 7.2 — the /clients table row shape. Composes per-client engine
- * calls in parallel (Section 9). For a typical company's client roster
- * (tens to low hundreds) this is simpler and still fast; a batched
- * aggregate version is a hardening-pass optimization if it ever isn't
- * (Section 15/M8), not a v1 requirement.
+ * calls in parallel (Section 9). `page`/`pageSize` push pagination down to
+ * `findClientsFiltered` (Mongo skip/limit) so the per-client enrichment
+ * fan-out only runs for the rows actually shown, not the whole filtered
+ * roster (Section 15/M8 hardening pass).
  */
 export async function getClientsListView(
   filter: ClientListFilter,
-  monthKey: string
+  monthKey: string,
+  page: number,
+  pageSize: number
 ): Promise<ClientListRow[]> {
-  const clients = await findClientsFiltered(filter);
+  const clients = await findClientsFiltered(filter, page, pageSize);
 
   const rows = await Promise.all(
     clients.map(async (client) => {

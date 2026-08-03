@@ -13,8 +13,6 @@ import { listLockedAccounts } from "@/server/services/accounts.service";
 import { resolveReconciliation } from "@/server/services/reconciliation.service";
 import type { CreateUserResult, UserRow } from "@/server/services/settings.service";
 
-export type { CreateUserResult, UserRow };
-
 function revalidateSettingsPaths() {
   revalidatePath("/settings");
   revalidatePath("/settings/users");

@@ -179,7 +179,7 @@ async function ActivityTabLoader({ clientId }: { clientId: string }) {
   return (
     <ActivityTab
       entries={entries.map((e) => ({
-        _id: e._id,
+        _id: e._id.toString(),
         action: e.action,
         summary: e.summary,
         actorName: e.actorName,

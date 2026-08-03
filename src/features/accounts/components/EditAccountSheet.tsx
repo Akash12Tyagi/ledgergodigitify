@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,7 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { TypedConfirmDialog } from "@/components/shared/TypedConfirmDialog";
 import { ACCOUNT_TYPES } from "@/constants/domain";
-import { formatINR, toPaise } from "@/lib/money";
+import { formatINR, paiseToRupeesPlain, toPaise } from "@/lib/money";
 import { updateAccountAction } from "@/features/accounts/actions";
 import type { AccountRow } from "@/features/accounts/actions";
 import type { UserRole } from "@/constants/roles";
@@ -55,7 +56,7 @@ export function EditAccountSheet({ account, role }: { account: AccountRow; role:
   const [formError, setFormError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
   const [openingConfirmOpen, setOpeningConfirmOpen] = React.useState(false);
-  const [newOpeningRupees, setNewOpeningRupees] = React.useState(String(account.openingBalancePaise / 100));
+  const [newOpeningRupees, setNewOpeningRupees] = React.useState(paiseToRupeesPlain(account.openingBalancePaise));
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -78,6 +79,7 @@ export function EditAccountSheet({ account, role }: { account: AccountRow; role:
         return;
       }
       setOpen(false);
+      toast.success("Account updated.");
       router.refresh();
     });
   }
@@ -99,6 +101,7 @@ export function EditAccountSheet({ account, role }: { account: AccountRow; role:
       setFormError(result.message);
       return;
     }
+    toast.success("Opening balance updated.");
     router.refresh();
   }
 

@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,22 +18,16 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { DateFieldIST } from "@/components/shared/DateFieldIST";
-import { toPaise } from "@/lib/money";
+import { paiseToRupeesPlain, toPaise } from "@/lib/money";
 import { updateSettingsAction } from "@/features/settings/actions";
+import { updateSettingsSchema, type UpdateSettingsInput } from "@/schemas/settings.schema";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 
-type SettingsFormValues = {
-  companyName: string;
-  largeExpenseAlertPaise: number;
-  lowBalanceDefaultPaise: number;
-  dueSoonDays: number;
-  financialYearStartMonth: number;
-  goLiveDate: Date | undefined;
-};
+type SettingsFormValues = UpdateSettingsInput;
 
 export type SettingsInitial = {
   companyName: string | null;
@@ -46,27 +42,28 @@ export type SettingsInitial = {
 export function SettingsForm({ initial }: { initial: SettingsInitial }) {
   const router = useRouter();
   const [largeExpenseRupees, setLargeExpenseRupees] = React.useState(
-    String(initial.largeExpenseAlertPaise / 100)
+    paiseToRupeesPlain(initial.largeExpenseAlertPaise)
   );
-  const [lowBalanceRupees, setLowBalanceRupees] = React.useState(String(initial.lowBalanceDefaultPaise / 100));
+  const [lowBalanceRupees, setLowBalanceRupees] = React.useState(
+    paiseToRupeesPlain(initial.lowBalanceDefaultPaise)
+  );
   const [formError, setFormError] = React.useState<string | null>(null);
-  const [saved, setSaved] = React.useState(false);
   const [pending, startTransition] = React.useTransition();
 
   const form = useForm<SettingsFormValues>({
+    resolver: zodResolver(updateSettingsSchema),
     defaultValues: {
       companyName: initial.companyName ?? "",
       largeExpenseAlertPaise: initial.largeExpenseAlertPaise,
       lowBalanceDefaultPaise: initial.lowBalanceDefaultPaise,
       dueSoonDays: initial.dueSoonDays,
       financialYearStartMonth: initial.financialYearStartMonth,
-      goLiveDate: initial.goLiveDate ? new Date(initial.goLiveDate) : undefined,
+      goLiveDate: initial.goLiveDate ? new Date(initial.goLiveDate) : null,
     },
   });
 
   function submit(values: SettingsFormValues) {
     setFormError(null);
-    setSaved(false);
     startTransition(async () => {
       const result = await updateSettingsAction({
         companyName: values.companyName,
@@ -80,7 +77,7 @@ export function SettingsForm({ initial }: { initial: SettingsInitial }) {
         setFormError(result.message);
         return;
       }
-      setSaved(true);
+      toast.success("Settings saved.");
       router.refresh();
     });
   }
@@ -224,7 +221,6 @@ export function SettingsForm({ initial }: { initial: SettingsInitial }) {
                 {formError}
               </p>
             ) : null}
-            {saved ? <p className="text-sm text-money-in">Settings saved.</p> : null}
 
             <Button type="submit" disabled={pending} className="w-fit">
               {pending ? "Saving…" : "Save settings"}

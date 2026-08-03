@@ -37,7 +37,7 @@ import { AccountSelect } from "@/components/shared/AccountSelect";
 import { DateFieldIST } from "@/components/shared/DateFieldIST";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { recordPaymentSchema, type RecordPaymentInput } from "@/schemas/payment.schema";
-import { formatINR, toPaise } from "@/lib/money";
+import { formatINR, paiseToRupeesPlain, toPaise } from "@/lib/money";
 import { LARGE_ENTRY_CONFIRM_PAISE } from "@/constants/finance";
 import { PAYMENT_METHODS } from "@/constants/domain";
 import { recordPaymentAction } from "@/features/payments/actions";
@@ -75,7 +75,7 @@ export function RecordPaymentSheet({
 }: RecordPaymentSheetProps) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
-  const [amountRupees, setAmountRupees] = React.useState(() => String(remainingPaise / 100));
+  const [amountRupees, setAmountRupees] = React.useState(() => paiseToRupeesPlain(remainingPaise));
   const [largeConfirmOpen, setLargeConfirmOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
@@ -106,7 +106,7 @@ export function RecordPaymentSheet({
   function resetForSheetOpen() {
     setSuccess(null);
     setFormError(null);
-    setAmountRupees(String(remainingPaise / 100));
+    setAmountRupees(paiseToRupeesPlain(remainingPaise));
     form.reset({
       clientId,
       monthlyBillingId,

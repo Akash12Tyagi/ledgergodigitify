@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,7 @@ import {
 } from "@/components/ui/sheet";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { DateFieldIST } from "@/components/shared/DateFieldIST";
-import { toPaise } from "@/lib/money";
+import { paiseToRupeesPlain, toPaise } from "@/lib/money";
 import { updateClientAction } from "@/features/clients/actions";
 import type { UpdateClientInput } from "@/schemas/client.schema";
 
@@ -55,7 +56,7 @@ type EditClientFormValues = {
 export function EditClientSheet({ client }: { client: EditableClient }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
-  const [amountRupees, setAmountRupees] = React.useState(String(client.amountPaise / 100));
+  const [amountRupees, setAmountRupees] = React.useState(paiseToRupeesPlain(client.amountPaise));
   const [conflict, setConflict] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
@@ -99,6 +100,7 @@ export function EditClientSheet({ client }: { client: EditableClient }) {
         return;
       }
       setOpen(false);
+      toast.success("Client updated.");
       router.refresh();
     });
   }

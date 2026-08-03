@@ -84,8 +84,18 @@ export default async function LedgerOverviewPage({
           ) : null}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <KpiCard label="Opening Position" value={formatINR(overview.openingPositionPaise)} />
-            <KpiCard label={`Billed — ${formatMonthLabel(monthKey)}`} value={formatINR(overview.billedPaise)} />
+            <DrilldownCard
+              label="Opening Position"
+              value={formatINR(overview.openingPositionPaise)}
+              href="#per-account"
+              ariaLabel={`View the per-account breakdown behind the opening position of ${formatINR(overview.openingPositionPaise)}`}
+            />
+            <DrilldownCard
+              label={`Billed — ${formatMonthLabel(monthKey)}`}
+              value={formatINR(overview.billedPaise)}
+              href="/ledger/billed"
+              ariaLabel={`View clients billed this month, totalling ${formatINR(overview.billedPaise)}`}
+            />
             <DrilldownCard
               label="Collected"
               value={formatINR(overview.collectedPaise)}
@@ -109,10 +119,15 @@ export default async function LedgerOverviewPage({
               label="Net Cash Flow"
               value={<AmountText paise={overview.netCashFlowPaise} tone="auto" />}
             />
-            <KpiCard label="Closing Position" value={formatINR(overview.closingPositionPaise)} />
+            <DrilldownCard
+              label="Closing Position"
+              value={formatINR(overview.closingPositionPaise)}
+              href="#per-account"
+              ariaLabel={`View the per-account breakdown behind the closing position of ${formatINR(overview.closingPositionPaise)}`}
+            />
           </div>
 
-          <Card>
+          <Card id="per-account">
             <CardHeader>
               <CardTitle className="text-sm font-medium">Per-Account</CardTitle>
             </CardHeader>

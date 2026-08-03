@@ -28,6 +28,18 @@ export async function getEntityAuditLog(kind: AuditEntityKind, id: string) {
   return findAuditLogsByEntity(kind, id);
 }
 
+// `before`/`after` are a Mongoose `Mixed` field — whatever the original
+// mutation passed in (often a raw `.lean()` doc) is stored verbatim, which
+// can include BSON ObjectIds/Dates. Those aren't plain objects, so passing
+// them straight through as a prop into the Client Component that renders
+// the diff (AuditDiffDialog) trips React's "Only plain objects can be
+// passed to Client Components" warning. A JSON round-trip converts every
+// ObjectId/Date to its string form (both have `toJSON`) — cheap, and
+// correct regardless of how a given entry was originally stored.
+function toPlainJson(value: unknown): unknown {
+  return value === null || value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
+
 /** Section 7.12 — /audit page, server-paginated. */
 export async function listAuditLogs(filter: AuditLogListFilter) {
   const { rows, total, page, pageSize } = await findAuditLogsPaginated(filter);
@@ -37,8 +49,8 @@ export async function listAuditLogs(filter: AuditLogListFilter) {
     action: r.action,
     entityKind: r.entity?.kind as AuditEntityKind,
     entityId: r.entity?.id ? r.entity.id.toString() : null,
-    before: r.before ?? null,
-    after: r.after ?? null,
+    before: toPlainJson(r.before),
+    after: toPlainJson(r.after),
     summary: r.summary,
     createdAt: r.createdAt.toISOString(),
   }));

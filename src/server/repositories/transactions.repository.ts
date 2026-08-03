@@ -67,12 +67,6 @@ export async function insertTransaction(input: InsertTransactionInput, session: 
   return assertCreated(doc, "transaction");
 }
 
-export async function findTransactionById(id: string) {
-  await db();
-  if (!Types.ObjectId.isValid(id)) return null;
-  return TransactionModel.findById(id).lean();
-}
-
 export async function findTransactionByIdempotencyKey(idempotencyKey: string) {
   await db();
   return TransactionModel.findOne({ idempotencyKey }).lean();
@@ -292,14 +286,6 @@ export async function findRecentTransactionsInRange(fromMonthKey: string, toMont
     .sort({ occurredAt: -1, _id: -1 })
     .limit(limit)
     .lean();
-}
-
-/** Task 2 — the Dashboard month picker's lower bound falls back to the
- * company's first financial record when no `settings.goLiveDate` is
- * configured (dashboard/page.tsx). */
-export async function findEarliestTransaction() {
-  await db();
-  return TransactionModel.findOne({ status: "active" }).sort({ occurredAt: 1, _id: 1 }).lean();
 }
 
 function buildTxMatch(filter: TxFilter): Record<string, unknown> {

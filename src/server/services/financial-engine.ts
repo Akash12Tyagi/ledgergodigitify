@@ -1,5 +1,5 @@
 import { AppError } from "@/lib/errors";
-import { daysOverdue as computeDaysOverdue, monthKeyToRange, shiftMonthKey, todayIST, toMonthKey } from "@/lib/dates";
+import { daysOverdue as computeDaysOverdue, monthKeyToRange, shiftMonthKey, todayIST } from "@/lib/dates";
 import {
   findAccountById,
   findAccountsByIds,
@@ -9,6 +9,7 @@ import {
 import { findClientById, findClientsByIds } from "@/server/repositories/clients.repository";
 import {
   findBillingsByClient,
+  findBillingsByMonth,
   findBillingsByStatus,
   sumBilledForMonth,
 } from "@/server/repositories/monthly-billings.repository";
@@ -16,7 +17,6 @@ import { sumExpensesByCategoryInRange } from "@/server/repositories/expenses.rep
 import { getSettingsOrDefaults } from "@/server/repositories/settings.repository";
 import {
   findAccountActivityPage,
-  findEarliestTransaction,
   findRecentTransactions,
   findRecentTransactionsInRange,
   findTransactionsPaginated,
@@ -438,6 +438,38 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
   };
 }
 
+export type BilledClientRow = {
+  clientId: string;
+  clientName: string;
+  billedPaise: number;
+  carriedInPaise: number;
+  status: PayStatus;
+  dueDate: string;
+};
+
+/** Section 15/M8 — the Ledger Overview's "Billed" drill-down
+ * (/ledger/billed). Every row's `billedPaise` sums to exactly
+ * `getMonthOverview(monthKey).billedPaise` (both read the same
+ * MonthlyBilling rows for the month) — carriedInPaise is shown for
+ * context but deliberately excluded from that sum, matching
+ * sumBilledForMonth's own field selection. */
+export async function getBilledClientsForMonth(monthKey: string): Promise<BilledClientRow[]> {
+  const billings = await findBillingsByMonth(monthKey);
+  const clients = await findClientsByIds(billings.map((b) => b.clientId.toString()));
+  const nameById = new Map(clients.map((c) => [c._id.toString(), c.name]));
+
+  return billings
+    .map((b) => ({
+      clientId: b.clientId.toString(),
+      clientName: nameById.get(b.clientId.toString()) ?? "Unknown client",
+      billedPaise: b.billedPaise,
+      carriedInPaise: b.carriedInPaise,
+      status: b.status,
+      dueDate: b.dueDate.toISOString(),
+    }))
+    .sort((a, b) => b.billedPaise - a.billedPaise);
+}
+
 /** "summed" per Section 4.2: flow figures (billed/collected/credits/
  * expenses/net) sum across the range; position figures (opening/closing)
  * use the range's first/last month; overdue/outstanding are today-relative
@@ -593,14 +625,6 @@ function previousMonthKeys(monthKey: string, count: number): string[] {
     keys.push(shiftMonthKey(monthKey, -i));
   }
   return keys;
-}
-
-/** Task 2 — Dashboard month picker lower bound: "first financial record
- * (or go-live date if configured)". Callers (dashboard/page.tsx) use
- * `settings.goLiveDate` first and only fall back to this when it's unset. */
-export async function getEarliestActivityMonthKey(): Promise<string | null> {
-  const earliest = await findEarliestTransaction();
-  return earliest ? toMonthKey(earliest.occurredAt) : null;
 }
 
 export async function getDashboardData(monthKey: string): Promise<DashboardData> {

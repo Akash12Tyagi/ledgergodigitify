@@ -18,7 +18,7 @@ import type { TxFilter } from "@/types/engine";
 const EXPORT_ALL_PAGE_SIZE = 1_000_000;
 
 export async function exportClientsCsv(filter: ClientListFilter): Promise<string> {
-  const rows = await getClientsListView(filter, toMonthKey(nowIST()));
+  const rows = await getClientsListView(filter, toMonthKey(nowIST()), 1, EXPORT_ALL_PAGE_SIZE);
   return toCsv(rows, [
     { header: "Name", value: (r) => r.name },
     { header: "Company", value: (r) => r.company ?? "" },

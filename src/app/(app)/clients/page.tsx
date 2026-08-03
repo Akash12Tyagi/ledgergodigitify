@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ClientsTableView } from "@/features/clients/components/ClientsTableView";
 import { getClientsListView } from "@/server/services/clients.service";
-import { findClientsFiltered } from "@/server/repositories/clients.repository";
+import { countClientsFiltered } from "@/server/repositories/clients.repository";
 import { toMonthKey, nowIST } from "@/lib/dates";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import type { ClientEngagementType, ClientStatus } from "@/constants/domain";
@@ -11,10 +11,12 @@ import type { ClientEngagementType, ClientStatus } from "@/constants/domain";
 export const metadata: Metadata = { title: "Clients — Finance & Ledger" };
 export const dynamic = "force-dynamic";
 
-// Section 7.2 — one composed data call per page (Section 9); pagination
-// happens in-memory over the already-filtered set since the "This Month"
-// status depends on a per-client engine call, not a stored field (see
-// clients.service.ts#getClientsListView).
+// Section 7.2 — one composed data call per page (Section 9). Pagination is
+// pushed down to Mongo (skip/limit in findClientsFiltered) so the "This
+// Month" per-client engine calls in getClientsListView only run for the
+// current page's rows, not the whole filtered roster (Section 15/M8
+// hardening pass — this used to fetch+enrich every matching client, then
+// slice in memory).
 export default async function ClientsPage({
   searchParams,
 }: {
@@ -30,13 +32,11 @@ export default async function ClientsPage({
   const monthKey = toMonthKey(nowIST());
   const filter = { status, engagementType, ...(search ? { search } : {}) };
 
-  const [allRows, hasAnyClientsAtAll] = await Promise.all([
-    getClientsListView(filter, monthKey),
-    findClientsFiltered({ status: "all" }).then((c) => c.length > 0),
+  const [pageRows, total, hasAnyClientsAtAll] = await Promise.all([
+    getClientsListView(filter, monthKey, page, pageSize),
+    countClientsFiltered(filter),
+    countClientsFiltered({ status: "all" }).then((n) => n > 0),
   ]);
-
-  const total = allRows.length;
-  const pageRows = allRows.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div>

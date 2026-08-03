@@ -5,7 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge, type DisplayStatus } from "@/components/shared/StatusBadge";
 import { UserRoleSelect } from "@/features/settings/components/UserRoleSelect";
 import { UserActiveAction } from "@/features/settings/components/UserActiveAction";
-import type { UserRow } from "@/features/settings/actions";
+import type { UserRow } from "@/server/services/settings.service";
 
 export function buildUsersColumns(currentUserId: string): ColumnDef<UserRow, unknown>[] {
   return [

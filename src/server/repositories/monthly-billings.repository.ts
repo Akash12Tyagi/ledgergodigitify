@@ -108,6 +108,14 @@ export async function findBillingsByStatus(statuses: PayStatus[]) {
   return MonthlyBillingModel.find({ status: { $in: statuses } }).lean();
 }
 
+/** Section 15/M8 — every MonthlyBilling row for one month, across every
+ * client; backs the Ledger Overview's "Billed" drill-down (/ledger/billed),
+ * whose rows must sum to the exact same total as sumBilledForMonth. */
+export async function findBillingsByMonth(monthKey: string) {
+  await db();
+  return MonthlyBillingModel.find({ monthKey }).lean();
+}
+
 export async function sumBilledForMonth(monthKey: string): Promise<number> {
   await db();
   const [result] = await MonthlyBillingModel.aggregate<{ total: number }>([
@@ -115,10 +123,4 @@ export async function sumBilledForMonth(monthKey: string): Promise<number> {
     { $group: { _id: null, total: { $sum: "$billedPaise" } } },
   ]);
   return result?.total ?? 0;
-}
-
-export async function findBillingsByClientIds(clientIds: string[]) {
-  await db();
-  const validIds = clientIds.filter((id) => Types.ObjectId.isValid(id));
-  return MonthlyBillingModel.find({ clientId: { $in: validIds } }).lean();
 }

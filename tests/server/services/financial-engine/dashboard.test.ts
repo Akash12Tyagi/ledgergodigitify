@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  getDashboardData,
-  getDashboardRangeData,
-  getEarliestActivityMonthKey,
-} from "@/server/services/financial-engine";
+import { getDashboardData, getDashboardRangeData } from "@/server/services/financial-engine";
 import { seedAccount, seedTransaction } from "../../../helpers/seed-financial";
 import { seedUser, clearAllCollections } from "../../../helpers/seed-user";
 
@@ -176,46 +172,5 @@ describe("getDashboardRangeData", () => {
     const narrower = await getDashboardRangeData("2026-06", "2026-07");
     expect(narrower.overview.collectedPaise).toBe(3_000_00);
     expect(narrower.recentActivity).toHaveLength(2);
-  });
-});
-
-// Task 2 — the Dashboard month picker's lower bound: go-live date, falling
-// back to the company's first financial record when unset.
-describe("getEarliestActivityMonthKey", () => {
-  afterEach(async () => {
-    await clearAllCollections();
-  });
-
-  it("returns null when there is no activity yet", async () => {
-    expect(await getEarliestActivityMonthKey()).toBeNull();
-  });
-
-  it("returns the monthKey of the oldest active transaction, ignoring reversed ones", async () => {
-    const owner = await seedUser({
-      name: "OwnerEarliest",
-      email: `earliest-${Date.now()}@example.com`,
-      password: "Correct-Horse-Battery-Staple-9",
-      role: "owner",
-    });
-    const account = await seedAccount({ openingBalancePaise: 0, currentBalancePaise: 0 });
-
-    await seedTransaction(owner._id, {
-      accountId: account._id,
-      monthKey: "2026-03",
-      occurredAt: new Date("2026-03-15T00:00:00.000Z"),
-    });
-    await seedTransaction(owner._id, {
-      accountId: account._id,
-      monthKey: "2026-05",
-      occurredAt: new Date("2026-05-01T00:00:00.000Z"),
-    });
-    await seedTransaction(owner._id, {
-      accountId: account._id,
-      monthKey: "2026-01",
-      occurredAt: new Date("2026-01-01T00:00:00.000Z"),
-      status: "reversed",
-    });
-
-    expect(await getEarliestActivityMonthKey()).toBe("2026-03");
   });
 });
