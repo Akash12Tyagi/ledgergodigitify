@@ -69,6 +69,20 @@ export function monthKeyToRange(monthKey: string): { startUTC: Date; endUTC: Dat
   return { startUTC, endUTC };
 }
 
+/** The UTC instants bounding an inclusive span of IST calendar months:
+ * [startUTC of `fromMonthKey`, endUTC of `toMonthKey`). Lets date-field
+ * collections (expenses' spentAt, credits' receivedAt) be scoped by the
+ * same From–To period the monthKey-based aggregates use. */
+export function monthRangeToUtc(
+  fromMonthKey: string,
+  toMonthKey: string
+): { startUTC: Date; endUTC: Date } {
+  return {
+    startUTC: monthKeyToRange(fromMonthKey).startUTC,
+    endUTC: monthKeyToRange(toMonthKey).endUTC,
+  };
+}
+
 function isLeapYear(year: number): boolean {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }

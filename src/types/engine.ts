@@ -1,4 +1,4 @@
-import type { PayStatus, TransactionType } from "@/constants/domain";
+import type { BillingGeneratedBy, PayStatus, TransactionType } from "@/constants/domain";
 
 // Section 4.1 — Financial Engine types. Every number in the app is
 // produced by financial-engine.ts using these shapes (Law 1).
@@ -9,15 +9,54 @@ export interface Money {
   paise: number;
 }
 
-export interface ClientMonthStatus {
+/**
+ * One billing period's worth of money owed by a client — a "due".
+ *
+ * Keyed on the PERIOD (periodStart/periodEnd), not on a calendar month, so
+ * 20th-to-20th and 7th-to-7th cycles are first-class rather than forced into
+ * a "YYYY-MM" bucket. `monthKey` remains only as the reporting bucket the
+ * month-scoped Ledger views total this due into.
+ *
+ * `id` is the MonthlyBilling id — carried on the row so the UI can record a
+ * payment against THIS specific due, which is what makes clearing an older
+ * period possible at all.
+ */
+export interface ClientDue {
+  id: string;
   clientId: string;
+  periodStart: string; // ISO date
+  periodEnd: string; // ISO date, exclusive
+  periodLabel: string; // "20 Aug – 19 Sep 2026"
   monthKey: MonthKey;
   billedPaise: number;
+  /** Legacy carry-forward from rows written before dues stopped carrying;
+   * always 0 on anything created since. Kept so historical rows still
+   * total correctly. */
   carriedInPaise: number;
   paidPaise: number;
   remainingPaise: number;
   status: PayStatus;
   dueDate: string; // ISO date
+  daysOverdue: number;
+  generatedBy: BillingGeneratedBy;
+  note: string | null;
+  version: number;
+}
+
+/** Everything the client screens need about what a client owes, computed
+ * once instead of re-derived per widget. */
+export interface ClientDuesSummary {
+  dues: ClientDue[];
+  openDues: ClientDue[];
+  /** The due to act on by default: the period containing today if there is
+   * one, else the oldest still-open due, else the newest due. Null only when
+   * the client has no dues at all. */
+  currentDue: ClientDue | null;
+  totalDuePaise: number;
+  lifetimePaidPaise: number;
+  /** Earliest unpaid due date across open dues — the client's real "next
+   * due", derived rather than stored, so it can never go stale. */
+  nextDueDate: string | null;
   daysOverdue: number;
 }
 
@@ -43,6 +82,11 @@ export interface MonthOverview {
   collectedPaise: number;
   creditsPaise: number;
   expensesPaise: number;
+  /** Net of manual account adjustments (IN minus OUT). Adjustments move a
+   * real account balance, so they MUST appear in the ledger equation —
+   * otherwise closing !== opening + net and the whole month would blank out
+   * behind the reconciliation banner. */
+  adjustmentsNetPaise: number;
   netCashFlowPaise: number;
   closingPositionPaise: number;
   outstandingDuesPaise: number;
@@ -69,7 +113,17 @@ export interface TxFilter {
   accountId?: string;
   clientId?: string;
   type?: TransactionType[];
+  /** Exactly one reporting month. */
   monthKey?: string;
+  /**
+   * An inclusive span of reporting months ("2026-06" … "2026-08"), for the
+   * app-wide From–To period picker. Takes precedence over `monthKey`.
+   * "YYYY-MM" compares correctly as a plain string, so this needs no date
+   * parsing and uses the same stored field the single-month path does —
+   * which is what keeps a range total equal to the sum of its months.
+   */
+  monthKeyFrom?: string;
+  monthKeyTo?: string;
   from?: Date;
   to?: Date;
   status?: TxStatusFilter;
@@ -104,8 +158,14 @@ export interface ActivityRow extends TxRow {
 export interface DueRow {
   clientId: string;
   clientName: string;
-  monthsOwed: MonthKey[];
+  /** Human labels of every open period this client owes for, oldest first —
+   * e.g. ["20 Jul – 19 Aug 2026", "20 Aug – 19 Sep 2026"]. Each period stays
+   * its own line item; unpaid remainders are never merged into the next
+   * period, so this list is the literal answer to "which periods are open". */
+  periodsOwed: string[];
   remainingPaise: number;
+  /** Earliest open due date across `periodsOwed` — what the row is bucketed
+   * and sorted by. */
   dueDate: string;
   daysOverdue: number;
   clientStatus: "active" | "paused" | "archived";

@@ -75,6 +75,11 @@ export type CreditListFilter = {
   category?: CreditCategory | "all";
   accountId?: string;
   status?: "active" | "reversed" | "all";
+  /** Half-open [receivedFrom, receivedTo) window, from the app-wide period
+   * picker. Credits have no stored monthKey, so the period is applied to
+   * `receivedAt`. */
+  receivedFrom?: Date;
+  receivedTo?: Date;
   page?: number;
   pageSize?: number;
 };
@@ -89,6 +94,12 @@ export async function findCreditsPaginated(filter: CreditListFilter) {
   if (filter.accountId) match.accountId = new Types.ObjectId(filter.accountId);
   if (!filter.status || filter.status === "active") match.status = "active";
   else if (filter.status === "reversed") match.status = "reversed";
+  if (filter.receivedFrom || filter.receivedTo) {
+    const window: Record<string, Date> = {};
+    if (filter.receivedFrom) window.$gte = filter.receivedFrom;
+    if (filter.receivedTo) window.$lt = filter.receivedTo;
+    match.receivedAt = window;
+  }
 
   const [rows, total] = await Promise.all([
     CreditModel.find(match)

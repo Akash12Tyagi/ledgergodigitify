@@ -7,8 +7,8 @@ import { CalendarRangeIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { setDashboardRangeAction } from "@/components/shared/dashboard-range-actions";
-import { useDashboardRangeStore } from "@/components/shared/dashboard-range-store";
+import { setPeriodRangeAction } from "@/components/shared/period-range-actions";
+import { usePeriodRangeStore } from "@/components/shared/period-range-store";
 import { formatMonthLabel, nowIST, shiftMonthKey, toMonthKey } from "@/lib/dates";
 
 const MONTH_NAMES = [
@@ -105,18 +105,22 @@ function MonthYearFields({
 }
 
 /**
- * The Dashboard's From–To range picker: two Month/Year fields plus preset
- * shortcuts, replacing single-month browsing so the Dashboard can show
- * totals summed across an arbitrary span (server/services/financial-
- * engine.ts#getDashboardRangeData). Deliberately its own component/cookie
- * pair (lib/dashboard-range-context.ts) rather than reusing MonthPicker/
- * MONTH_COOKIE, which stays untouched for /ledger/overview.
+ * The app-wide From–To period picker: two Month/Year fields plus preset
+ * shortcuts, driving every period-scoped figure in the app — the Dashboard,
+ * the Ledger Overview's money-math block and transaction list, and the
+ * Billed drill-down. All of them read the one cookie pair this writes
+ * (lib/period-range-context.ts), so the screens can never disagree about
+ * which period is being viewed.
+ *
+ * It replaced MonthPicker, which browsed a single month through a separate
+ * cookie: the Ledger and the Dashboard each tracked their own idea of "now"
+ * and routinely showed different periods side by side.
  *
  * `minMonthKey` (optional — the configured go-live date) floors `from`;
  * unset means no lower bound at all. `to` is always capped at the real
  * current month so future periods are never selectable.
  */
-export function DashboardRangePicker({
+export function PeriodRangePicker({
   fromMonthKey,
   toMonthKey: toMonthKeyProp,
   minMonthKey,
@@ -126,7 +130,7 @@ export function DashboardRangePicker({
   minMonthKey?: string | undefined;
 }) {
   const router = useRouter();
-  const { from: storeFrom, to: storeTo, setRange } = useDashboardRangeStore();
+  const { from: storeFrom, to: storeTo, setRange } = usePeriodRangeStore();
   const [pending, startTransition] = React.useTransition();
   const [open, setOpen] = React.useState(false);
 
@@ -146,7 +150,7 @@ export function DashboardRangePicker({
     const safeFrom = clampedFrom > clampedTo ? clampedTo : clampedFrom;
     setRange(safeFrom, clampedTo);
     startTransition(async () => {
-      await setDashboardRangeAction(safeFrom, clampedTo);
+      await setPeriodRangeAction(safeFrom, clampedTo);
       router.refresh();
     });
   }

@@ -26,12 +26,18 @@ export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export const ACCOUNT_STATUSES = ["active", "archived"] as const;
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
+// ADJUSTMENT — a manual correction to an account's balance (cash recount,
+// bank charge, opening-balance error found later). Direction IN or OUT.
+// It is a real transaction rather than an edit of the stored balance so the
+// audit trail stays truthful and history never changes retroactively; the
+// month overview counts it in netCashFlow for the same reason.
 export const TRANSACTION_TYPES = [
   "PAYMENT_IN",
   "CREDIT_IN",
   "EXPENSE_OUT",
   "TRANSFER",
   "REVERSAL",
+  "ADJUSTMENT",
 ] as const;
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 

@@ -32,6 +32,23 @@ export async function createNotificationIfNotExists(
   session?: ClientSession
 ) {
   await db();
+
+  // Read before writing, rather than inserting and catching E11000.
+  //
+  // Inside an active transaction a duplicate-key error ABORTS the whole
+  // transaction. Swallowing it here left the caller running against a dead
+  // session, and `session.withTransaction` then classified the failure as
+  // transient and retried the entire callback — which hit the same duplicate
+  // again, forever. Any second same-day dedupeKey (two expenses from one
+  // account both tripping the LOW_BALANCE alert, for instance) hung the
+  // request rather than deduping it. A read costs one indexed lookup and
+  // cannot abort anything.
+  const existing = await NotificationModel.findOne({ dedupeKey: input.dedupeKey })
+    .select({ _id: 1 })
+    .session(session ?? null)
+    .lean();
+  if (existing) return null;
+
   try {
     const [doc] = await NotificationModel.create(
       [
@@ -50,8 +67,14 @@ export async function createNotificationIfNotExists(
     );
     return doc ?? null;
   } catch (error) {
-    if (isDuplicateDedupeKey(error)) return null;
-    throw error;
+    if (!isDuplicateDedupeKey(error)) throw error;
+    // Outside a transaction this is the genuine concurrent-insert race, and
+    // deduping is exactly the intent. Inside one the transaction is already
+    // aborted, so it must be rethrown — withTransaction retries, and the
+    // read above then sees the committed row and returns cleanly. That
+    // terminates; swallowing it does not.
+    if (session) throw error;
+    return null;
   }
 }
 

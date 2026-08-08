@@ -18,13 +18,33 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   )
 }
 
-function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
+/**
+ * Base UI's Select.Value renders the raw VALUE, not the selected item's
+ * label — the item's children are never reused for the trigger. So a bare
+ * `<SelectValue />` shows "upi_wallet", "all", or worse, a raw ObjectId.
+ *
+ * Pass `labels` (value -> label) and the trigger displays the same text the
+ * open list does. `children` still accepts Base UI's formatter function
+ * directly for cases where the label is computed rather than looked up.
+ */
+function SelectValue({
+  className,
+  labels,
+  children,
+  ...props
+}: SelectPrimitive.Value.Props & { labels?: Record<string, React.ReactNode> }) {
   return (
     <SelectPrimitive.Value
       data-slot="select-value"
       className={cn("flex flex-1 text-left", className)}
       {...props}
-    />
+    >
+      {children ??
+        (labels
+          ? (value: unknown) =>
+              value == null ? null : (labels[String(value)] ?? String(value))
+          : undefined)}
+    </SelectPrimitive.Value>
   )
 }
 

@@ -95,6 +95,12 @@ export type ExpenseListFilter = {
   category?: ExpenseCategory | "all";
   accountId?: string;
   status?: "active" | "reversed" | "all";
+  /** Half-open [spentFrom, spentTo) window, from the app-wide period
+   * picker. Expenses have no stored monthKey, so the period is applied to
+   * `spentAt` — the same field getMonthOverview's category breakdown uses,
+   * so the two agree. */
+  spentFrom?: Date;
+  spentTo?: Date;
   page?: number;
   pageSize?: number;
 };
@@ -110,6 +116,12 @@ export async function findExpensesPaginated(filter: ExpenseListFilter) {
   if (filter.accountId) match.accountId = new Types.ObjectId(filter.accountId);
   if (!filter.status || filter.status === "active") match.status = "active";
   else if (filter.status === "reversed") match.status = "reversed";
+  if (filter.spentFrom || filter.spentTo) {
+    const window: Record<string, Date> = {};
+    if (filter.spentFrom) window.$gte = filter.spentFrom;
+    if (filter.spentTo) window.$lt = filter.spentTo;
+    match.spentAt = window;
+  }
 
   const [rows, total] = await Promise.all([
     ExpenseModel.find(match)

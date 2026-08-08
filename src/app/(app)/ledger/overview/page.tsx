@@ -5,15 +5,16 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { DrilldownCard } from "@/components/shared/DrilldownCard";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { AmountText } from "@/components/shared/AmountText";
-import { MonthPicker } from "@/components/shared/MonthPicker";
+import { PeriodRangePicker } from "@/components/shared/PeriodRangePicker";
 import { ReconciliationBanner } from "@/components/shared/ReconciliationBanner";
 import { DevSumAssertion } from "@/components/shared/DevSumAssertion";
 import { TransactionsTableView } from "@/components/shared/TransactionsTableView";
 import { ExpenseCategoryChartLazy } from "@/components/shared/charts/ExpenseCategoryChartLazy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getMonthOverview, listTransactions, sumFilteredTransactions } from "@/server/services/financial-engine";
+import { getRangeOverview, listTransactions, sumFilteredTransactions } from "@/server/services/financial-engine";
+import { getSettings } from "@/server/services/settings.service";
 import { requireUser } from "@/server/auth/guards";
-import { MONTH_COOKIE, resolveMonthKey } from "@/lib/month-context";
+import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
 import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
@@ -38,7 +39,12 @@ export default async function LedgerOverviewPage({
   await requireUser("viewer");
   const params = await searchParams;
   const cookieStore = await cookies();
-  const monthKey = resolveMonthKey(cookieStore.get(MONTH_COOKIE)?.value, toMonthKey(nowIST()));
+  // The same cookie pair the Dashboard reads — one period for the whole app.
+  const { from: fromMonthKey, to: toMonthKeyValue } = resolvePeriodRange(
+    cookieStore.get(PERIOD_FROM_COOKIE)?.value,
+    cookieStore.get(PERIOD_TO_COOKIE)?.value,
+    toMonthKey(nowIST())
+  );
 
   const page = Math.max(1, Number(params.page ?? "1"));
   const pageSize = Math.max(1, Number(params.pageSize ?? String(PAGE_SIZE_DEFAULT)));
@@ -48,10 +54,22 @@ export default async function LedgerOverviewPage({
       ? [typeParam as TransactionType]
       : undefined;
 
-  const [overview, txList] = await Promise.all([
-    getMonthOverview(monthKey),
-    listTransactions({ monthKey, ...(type ? { type } : {}), page, pageSize }),
+  // The transaction list is scoped to the SAME month span the cards above
+  // it total, so "card === sum(rows)" still holds by construction once the
+  // period can cover more than one month.
+  const periodFilter = { monthKeyFrom: fromMonthKey, monthKeyTo: toMonthKeyValue };
+
+  const [overview, txList, settings] = await Promise.all([
+    getRangeOverview(fromMonthKey, toMonthKeyValue),
+    listTransactions({ ...periodFilter, ...(type ? { type } : {}), page, pageSize }),
+    getSettings(),
   ]);
+
+  const minMonthKey = settings.goLiveDate ? toMonthKey(settings.goLiveDate) : undefined;
+  const rangeLabel =
+    fromMonthKey === toMonthKeyValue
+      ? formatMonthLabel(toMonthKeyValue)
+      : `${formatMonthLabel(fromMonthKey)} – ${formatMonthLabel(toMonthKeyValue)}`;
 
   let assertionLabel: string | null = null;
   let expectedPaise = 0;
@@ -68,12 +86,21 @@ export default async function LedgerOverviewPage({
     }
   }
   const actualPaise = assertionLabel
-    ? await sumFilteredTransactions({ monthKey, ...(type ? { type } : {}) })
+    ? await sumFilteredTransactions({ ...periodFilter, ...(type ? { type } : {}) })
     : 0;
 
   return (
     <div>
-      <PageHeader title="Ledger Overview" action={<MonthPicker monthKey={monthKey} />} />
+      <PageHeader
+        title="Ledger Overview"
+        action={
+          <PeriodRangePicker
+            fromMonthKey={fromMonthKey}
+            toMonthKey={toMonthKeyValue}
+            minMonthKey={minMonthKey}
+          />
+        }
+      />
 
       {overview.reconciliationError ? (
         <ReconciliationBanner />
@@ -91,7 +118,7 @@ export default async function LedgerOverviewPage({
               ariaLabel={`View the per-account breakdown behind the opening position of ${formatINR(overview.openingPositionPaise)}`}
             />
             <DrilldownCard
-              label={`Billed — ${formatMonthLabel(monthKey)}`}
+              label={`Billed — ${rangeLabel}`}
               value={formatINR(overview.billedPaise)}
               href="/ledger/billed"
               ariaLabel={`View clients billed this month, totalling ${formatINR(overview.billedPaise)}`}
@@ -115,6 +142,19 @@ export default async function LedgerOverviewPage({
               ariaLabel={`View expenses, totalling ${formatINR(overview.expensesPaise)}`}
               tone={overview.expensesPaise > 0 ? "warn" : "neutral"}
             />
+            {/* Only shown when there are any. Manual balance corrections are
+                rare, but they move real money, so when they exist they must
+                be visible in the math block — otherwise Net Cash Flow would
+                appear not to add up from the cards above it. */}
+            {overview.adjustmentsNetPaise !== 0 ? (
+              <DrilldownCard
+                label="Adjustments"
+                value={formatINR(overview.adjustmentsNetPaise)}
+                href="/ledger/overview?type=ADJUSTMENT"
+                ariaLabel={`View manual balance adjustments, netting ${formatINR(overview.adjustmentsNetPaise)}`}
+                tone="warn"
+              />
+            ) : null}
             <KpiCard
               label="Net Cash Flow"
               value={<AmountText paise={overview.netCashFlowPaise} tone="auto" />}

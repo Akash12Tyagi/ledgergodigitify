@@ -1,17 +1,14 @@
-// Section 3/7.1 — the active-month context shared across /dashboard and
-// /ledger/overview, persisted as a cookie (the SSR source of truth for
-// which monthKey a page's composed data call uses) and mirrored into a
-// Zustand slice for instant client-side UI (components/shared/month-store.ts).
-export const MONTH_COOKIE = "activeMonthKey";
+// Month-key validation, shared by everything that reads a "YYYY-MM" from an
+// untrusted source (cookies, query strings).
+//
+// This module used to also own MONTH_COOKIE and resolveMonthKey — a single
+// active month that drove /ledger/overview while the Dashboard tracked its
+// own From–To range. Two competing notions of "the period being viewed"
+// meant the two screens routinely disagreed, so the app now has exactly one
+// (lib/period-range-context.ts) and only the validator survives here.
 
 const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export function isValidMonthKey(value: string | undefined | null): value is string {
   return typeof value === "string" && MONTH_KEY_PATTERN.test(value);
-}
-
-/** Resolves the effective monthKey for a page render: the cookie value if
- * present and well-formed, else `fallback` (normally toMonthKey(nowIST())). */
-export function resolveMonthKey(cookieValue: string | undefined, fallback: string): string {
-  return isValidMonthKey(cookieValue) ? cookieValue : fallback;
 }

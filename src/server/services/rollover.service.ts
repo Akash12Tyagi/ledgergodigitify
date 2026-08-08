@@ -1,21 +1,19 @@
 import { withDbTransaction } from "@/lib/db-transaction";
-import { clampBillingDay, dayOfMonthIST, nowIST, toMonthKey } from "@/lib/dates";
+import { nowIST } from "@/lib/dates";
+import { anchorDayFrom, formatPeriodLabel, nextPeriodAfter, reportingMonthKey } from "@/lib/billing-period";
 import { findActiveRetainerClients } from "@/server/repositories/clients.repository";
 import {
-  findBillingByClientAndMonth,
-  findBillingsByClient,
+  findLatestBillingForClient,
   insertBilling,
-  setBillingCarriedOut,
 } from "@/server/repositories/monthly-billings.repository";
-import { computeOverpaymentSurplus, deriveBillingStatus } from "@/server/services/financial-engine";
 import { logAudit } from "@/server/services/audit.service";
 
 export type RolloverResult = {
-  monthKey: string;
+  ranAt: string;
   scanned: number;
   created: number;
   skipped: number;
-  failed: Array<{ clientId: string; error: string }>;
+  failed: Array<{ clientId: string; clientName: string; error: string }>;
 };
 
 function isDuplicateKeyError(error: unknown): boolean {
@@ -23,100 +21,154 @@ function isDuplicateKeyError(error: unknown): boolean {
 }
 
 /**
- * Section 6.8A — the daily rollover cron. Only active retainer clients are
- * scanned (Section 14 edge case 16: paused clients are skipped by the
- * repository's status:"active" filter, never back-billed on resume).
- * State-based idempotency (Section 14 edge case 41/42): existence of a
- * MonthlyBilling for {clientId, monthKey} is the only signal checked —
- * running this 5x in a row produces exactly one billing per client-month,
- * and a missed day self-heals on the next successful run since there's no
- * "did I run today" flag to miss.
+ * Upper bound on how many periods one client can be caught up by in a single
+ * run. A cron that has been down for a while SHOULD backfill every missed
+ * period, so this is set well above any realistic outage — it exists only so
+ * a corrupt date can never spin this loop forever. Hitting it is reported as
+ * a failure rather than silently truncating a client's billing history.
+ */
+const MAX_CATCHUP_PERIODS = 36;
+
+/**
+ * The recurring-billing job: raise the next period for every active retainer
+ * whose current period has ended.
+ *
+ * Two things changed here versus the original month-keyed version, both of
+ * which were producing wrong money:
+ *
+ * 1. Periods advance from the client's OWN last period, not from today's
+ *    calendar month. The old version asked "does a billing exist for
+ *    2026-08?" and, finding none for a client whose first due was 5 Sep,
+ *    billed them for August anyway — with a due date of 5 Aug, already in
+ *    the past, so a brand-new client was instantly overdue for a period
+ *    nobody had agreed to. Advancing from real history makes back-billing
+ *    structurally impossible.
+ *
+ * 2. Nothing carries forward. An unpaid remainder stays on the period it
+ *    belongs to; the next period is raised at the client's full rate. The
+ *    old version MOVED the shortfall into the new period and marked the old
+ *    one FULLY_PAID, which made a genuinely unpaid month read as settled in
+ *    every history view and receipt.
+ *
+ * Idempotency is state-based: what exists in the database is the only signal
+ * consulted, so running this five times in a row, or twice concurrently,
+ * produces exactly one billing per client-period. A missed day self-heals on
+ * the next run because there is no "did I run today" flag to miss.
  */
 export async function runRollover(actorId: string, actorName: string): Promise<RolloverResult> {
-  const monthKey = toMonthKey(nowIST());
   const clients = await findActiveRetainerClients();
+  const nowMs = nowIST().getTime();
 
   let created = 0;
   let skipped = 0;
-  const failed: Array<{ clientId: string; error: string }> = [];
+  const failed: RolloverResult["failed"] = [];
 
   for (const client of clients) {
     const clientId = client._id.toString();
 
     try {
-      const existing = await findBillingByClientAndMonth(clientId, monthKey);
-      if (existing) {
+      const latest = await findLatestBillingForClient(clientId);
+      if (!latest) {
+        // No history to advance from. createClient always raises the first
+        // due, so this only happens if every due was deleted by hand — in
+        // which case guessing a period would be inventing money.
         skipped += 1;
         continue;
       }
 
-      await withDbTransaction(async (session) => {
-        const billingDay = client.billingDay ?? dayOfMonthIST(client.nextDueDate);
-        const [year, month] = monthKey.split("-").map(Number) as [number, number];
-        const dueDate = clampBillingDay(year, month, billingDay);
+      if (!latest.periodStart || !latest.periodEnd) {
+        failed.push({
+          clientId,
+          clientName: client.name,
+          error:
+            "Latest due has no billing period — run scripts/migrate-billing-periods.ts before rolling over.",
+        });
+        continue;
+      }
 
-        // Carry-as-a-MOVE: find the most recent billing strictly before
-        // this month and move its unpaid remainder (or overpaid surplus)
-        // forward, per Section 6.8A.
-        const priorBillings = await findBillingsByClient(clientId); // sorted desc by monthKey
-        const prior = priorBillings.find((b) => b.monthKey < monthKey);
+      // The anchor comes from the client, not from the last period's start
+      // date, which may have been clamped (an anchor of 31 lands on 28 Feb).
+      // Re-deriving it from a clamped start would walk the billing date
+      // permanently backwards.
+      const anchorDay = client.billingDay ?? anchorDayFrom(latest.periodStart);
 
-        let carriedInPaise = 0;
-        if (prior) {
-          const { remainingPaise } = deriveBillingStatus(prior);
-          if (remainingPaise > 0) {
-            carriedInPaise = remainingPaise;
-            await setBillingCarriedOut(prior._id.toString(), remainingPaise, "FULLY_PAID", session);
-          } else {
-            const surplus = computeOverpaymentSurplus(prior);
-            if (surplus > 0) {
-              carriedInPaise = -surplus;
-              await setBillingCarriedOut(prior._id.toString(), surplus, "FULLY_PAID", session);
-            }
-          }
+      let cursor = { periodStart: latest.periodStart, periodEnd: latest.periodEnd };
+      let createdForClient = 0;
+
+      // A period becomes billable the moment it starts — which is exactly
+      // when the previous one ends, since retainers are collected up front.
+      while (cursor.periodEnd.getTime() <= nowMs) {
+        if (createdForClient >= MAX_CATCHUP_PERIODS) {
+          failed.push({
+            clientId,
+            clientName: client.name,
+            error: `Stopped after ${MAX_CATCHUP_PERIODS} catch-up periods — check this client's billing dates.`,
+          });
+          break;
         }
 
-        const billing = await insertBilling(
-          {
-            clientId,
-            monthKey,
-            billedPaise: client.amountPaise,
-            carriedInPaise,
-            dueDate,
-            generatedBy: "rollover",
-          },
-          session
-        );
+        const next = nextPeriodAfter(cursor, anchorDay);
 
-        await logAudit(
-          {
-            actorUserId: actorId,
-            actorName,
-            action: "BILLING_GENERATED",
-            entity: { kind: "client", id: client._id },
-            after: { monthKey, billedPaise: billing.billedPaise, carriedInPaise },
-            summary:
-              `Rollover generated ${monthKey} billing for "${client.name}"` +
-              (carriedInPaise !== 0
-                ? ` (carried ${carriedInPaise > 0 ? "in" : "out"} ${Math.abs(carriedInPaise)} paise)`
-                : ""),
-          },
-          session
-        );
-      });
+        await withDbTransaction(async (session) => {
+          const billing = await insertBilling(
+            {
+              clientId,
+              periodStart: next.periodStart,
+              periodEnd: next.periodEnd,
+              monthKey: reportingMonthKey(next.periodStart),
+              billedPaise: client.amountPaise,
+              // Collected up front: the money for a period is owed on the
+              // day that period begins.
+              dueDate: next.periodStart,
+              generatedBy: "rollover",
+            },
+            session
+          );
 
-      created += 1;
+          await logAudit(
+            {
+              actorUserId: actorId,
+              actorName,
+              action: "BILLING_GENERATED",
+              entity: { kind: "billing", id: billing._id },
+              after: {
+                clientId,
+                period: formatPeriodLabel(next.periodStart, next.periodEnd),
+                billedPaise: billing.billedPaise,
+              },
+              summary: `Generated ${formatPeriodLabel(next.periodStart, next.periodEnd)} due for "${client.name}"`,
+            },
+            session
+          );
+        });
+
+        cursor = next;
+        createdForClient += 1;
+      }
+
+      if (createdForClient === 0) skipped += 1;
+      created += createdForClient;
     } catch (error) {
       if (isDuplicateKeyError(error)) {
-        // Section 14 edge case 41 — a concurrent/overlapping cron run
-        // already created this exact {clientId, monthKey}; that's a
-        // no-op, not a failure.
+        // A concurrent/overlapping run already created this exact
+        // {clientId, periodStart}. That is the idempotency guarantee doing
+        // its job, not a failure.
         skipped += 1;
         continue;
       }
-      failed.push({ clientId, error: error instanceof Error ? error.message : String(error) });
+      failed.push({
+        clientId,
+        clientName: client.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
-  return { monthKey, scanned: clients.length, created, skipped, failed };
+  return {
+    ranAt: new Date().toISOString(),
+    scanned: clients.length,
+    created,
+    skipped,
+    failed,
+  };
 }

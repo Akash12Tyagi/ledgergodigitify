@@ -16,11 +16,20 @@ import { getClientTotalDue } from "@/server/services/financial-engine";
 // editing/pausing/resuming a client needs staff+; archiving needs admin+
 // (same row as "Archive clients" in the matrix).
 
+/**
+ * Creating a client also raises their first due, which is money the business
+ * is now owed — so the month-scoped Ledger views have to be invalidated too,
+ * not just the client screens. Omitting /ledger/overview and /ledger/billed
+ * here is why the Ledger's "Billed" card kept showing a stale total after a
+ * client was added: the database was right and the page was not.
+ */
 function revalidateClientPaths(clientId?: string) {
   revalidatePath("/clients");
   if (clientId) revalidatePath(`/clients/${clientId}`);
   revalidatePath("/dashboard");
   revalidatePath("/ledger/dues");
+  revalidatePath("/ledger/overview");
+  revalidatePath("/ledger/billed");
 }
 
 export async function createClientAction(input: unknown): Promise<ApiResult<{ clientId: string }>> {

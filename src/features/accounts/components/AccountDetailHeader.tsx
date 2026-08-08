@@ -8,6 +8,7 @@ import { StatusBadge, type DisplayStatus } from "@/components/shared/StatusBadge
 import { TypedConfirmDialog } from "@/components/shared/TypedConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { EditAccountSheet } from "@/features/accounts/components/EditAccountSheet";
+import { AdjustBalanceSheet } from "@/features/accounts/components/AdjustBalanceSheet";
 import { archiveAccountAction, setDefaultAccountAction } from "@/features/accounts/actions";
 import type { AccountRow } from "@/features/accounts/actions";
 import { formatINR } from "@/lib/money";
@@ -61,6 +62,13 @@ export function AccountDetailHeader({ account, role }: { account: AccountRow; ro
       {canManage && !isArchived ? (
         <div className="flex items-center gap-2">
           <EditAccountSheet account={account} role={role} />
+          <AdjustBalanceSheet
+            accountId={account.id}
+            accountName={account.name}
+            currentBalancePaise={account.currentBalancePaise}
+            trigger={<Button variant="outline" size="sm" />}
+            triggerLabel="Adjust Balance"
+          />
           {!account.isDefault ? (
             <Button variant="outline" size="sm" onClick={() => void handleSetDefault()}>
               Set as default

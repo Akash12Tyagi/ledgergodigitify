@@ -43,7 +43,7 @@ export function CreditsTableView({
         <div className="flex flex-wrap items-center gap-2">
           <Select value={searchParams.get("category") ?? "all"} onValueChange={(v) => setParam("category", v ?? "all")}>
             <SelectTrigger className="w-40">
-              <SelectValue />
+              <SelectValue className="capitalize" labels={{ all: "All categories" }} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All categories</SelectItem>
@@ -56,7 +56,7 @@ export function CreditsTableView({
           </Select>
           <Select value={searchParams.get("status") ?? "active"} onValueChange={(v) => setParam("status", v ?? "active")}>
             <SelectTrigger className="w-36">
-              <SelectValue />
+              <SelectValue labels={{ active: "Active", reversed: "Reversed", all: "All" }} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="active">Active</SelectItem>

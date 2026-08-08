@@ -4,7 +4,6 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { ClientsTableView } from "@/features/clients/components/ClientsTableView";
 import { getClientsListView } from "@/server/services/clients.service";
 import { countClientsFiltered } from "@/server/repositories/clients.repository";
-import { toMonthKey, nowIST } from "@/lib/dates";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import type { ClientEngagementType, ClientStatus } from "@/constants/domain";
 
@@ -29,11 +28,14 @@ export default async function ClientsPage({
   const engagementType = (params.type as ClientEngagementType | "all" | undefined) ?? "all";
   const search = params.search;
 
-  const monthKey = toMonthKey(nowIST());
+  // No monthKey here any more: a client's dues are period-based, so the row
+  // reports their CURRENT period and their total across every open period —
+  // figures that are true regardless of which month the Ledger is browsing,
+  // and which therefore can't fall out of step with it.
   const filter = { status, engagementType, ...(search ? { search } : {}) };
 
   const [pageRows, total, hasAnyClientsAtAll] = await Promise.all([
-    getClientsListView(filter, monthKey, page, pageSize),
+    getClientsListView(filter, page, pageSize),
     countClientsFiltered(filter),
     countClientsFiltered({ status: "all" }).then((n) => n > 0),
   ]);

@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "bootstrap-owner": "tsx scripts/bootstrap-owner.ts",
     "db-check": "tsx scripts/db-check.ts",
+    "migrate-billing-periods": "tsx scripts/migrate-billing-periods.ts",
+    "reset-db": "tsx scripts/reset-db.ts",
     "verify-indexes": "tsx scripts/verify-indexes.ts",
     "reconcile-fuzz": "tsx scripts/reconcile-fuzz.ts",
     "cloudinary-check": "tsx scripts/cloudinary-check.ts",

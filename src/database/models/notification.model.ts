@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import {
   NOTIFICATION_AUDIENCES,
@@ -32,6 +33,4 @@ notificationSchema.index({ dedupeKey: 1 }, { unique: true });
 
 export type NotificationDoc = InferSchemaType<typeof notificationSchema>;
 
-export const NotificationModel =
-  (mongoose.models.Notification as mongoose.Model<NotificationDoc>) ??
-  mongoose.model<NotificationDoc>("Notification", notificationSchema);
+export const NotificationModel = registerModel<NotificationDoc>("Notification", notificationSchema);

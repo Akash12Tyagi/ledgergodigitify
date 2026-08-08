@@ -210,7 +210,7 @@ export function CreateExpenseSheet({ role }: { role: UserRole }) {
                       <Select value={field.value} onValueChange={field.onChange}>
                         <FormControl>
                           <SelectTrigger className="w-full">
-                            <SelectValue />
+                            <SelectValue labels={CATEGORY_LABELS} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>

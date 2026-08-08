@@ -1,6 +1,6 @@
 import { AppError } from "@/lib/errors";
 import { withDbTransaction } from "@/lib/db-transaction";
-import { dayOfMonthIST, toMonthKey } from "@/lib/dates";
+import { anchorDayFrom, periodEndFor, reportingMonthKey } from "@/lib/billing-period";
 import { logAudit } from "@/server/services/audit.service";
 import {
   findClientByNameCaseInsensitive,
@@ -11,18 +11,9 @@ import {
   updateClientOptimistic,
   type ClientListFilter,
 } from "@/server/repositories/clients.repository";
-import {
-  findBillingByClientAndMonth,
-  findBillingsByClient,
-  insertBilling,
-} from "@/server/repositories/monthly-billings.repository";
-import { findPaymentsByBilling, findPaymentsByClient } from "@/server/repositories/payments.repository";
-import {
-  getClientHistory,
-  getClientLifetimePaid,
-  getClientMonthStatus,
-  getClientTotalDue,
-} from "@/server/services/financial-engine";
+import { insertBilling } from "@/server/repositories/monthly-billings.repository";
+import { findPaymentsByClient } from "@/server/repositories/payments.repository";
+import { getClientDuesSummary } from "@/server/services/financial-engine";
 import type { AuthedUser } from "@/server/auth/guards";
 import type { ClientInput, UpdateClientInput } from "@/schemas/client.schema";
 import type { ClientListRow } from "@/types/client";
@@ -33,10 +24,11 @@ import type { ClientListRow } from "@/types/client";
 // validation. Client + first MonthlyBilling insert atomically (Law 4).
 export async function createClient(input: ClientInput, actor: AuthedUser) {
   return withDbTransaction(async (session) => {
-    const billingDay =
-      input.engagementType === "retainer"
-        ? (input.billingDay ?? dayOfMonthIST(input.nextDueDate))
-        : null;
+    // The cycle anchor: the day-of-month every future period starts on. A
+    // client whose first due date is the 20th runs 20th-to-20th from then on,
+    // which is what makes non-calendar cycles work at all.
+    const anchorDay = input.billingDay ?? anchorDayFrom(input.nextDueDate);
+    const billingDay = input.engagementType === "retainer" ? anchorDay : null;
 
     const client = await insertClient(
       {
@@ -57,12 +49,20 @@ export async function createClient(input: ClientInput, actor: AuthedUser) {
       session
     );
 
+    // The first due covers the period STARTING on the client's first due
+    // date. Retainers are collected up front, so dueDate === periodStart:
+    // the money for 20 Aug – 19 Sep is owed on 20 Aug, not at the end.
+    const periodStart = input.nextDueDate;
+    const periodEnd = periodEndFor(periodStart, anchorDay);
+
     const billing = await insertBilling(
       {
         clientId: client._id.toString(),
-        monthKey: toMonthKey(input.nextDueDate),
+        periodStart,
+        periodEnd,
+        monthKey: reportingMonthKey(periodStart),
         billedPaise: input.amountPaise,
-        dueDate: input.nextDueDate,
+        dueDate: periodStart,
         generatedBy: "client_create",
       },
       session
@@ -195,7 +195,6 @@ export async function unarchiveClient(clientId: string, actor: AuthedUser) {
  */
 export async function getClientsListView(
   filter: ClientListFilter,
-  monthKey: string,
   page: number,
   pageSize: number
 ): Promise<ClientListRow[]> {
@@ -204,12 +203,12 @@ export async function getClientsListView(
   const rows = await Promise.all(
     clients.map(async (client) => {
       const clientId = client._id.toString();
-      const [monthStatus, totalDue, payments] = await Promise.all([
-        getClientMonthStatus(clientId, monthKey),
-        getClientTotalDue(clientId),
+      const [summary, payments] = await Promise.all([
+        getClientDuesSummary(clientId),
         findPaymentsByClient(clientId),
       ]);
       const lastPayment = payments.find((p) => p.status === "active") ?? null;
+      const current = summary.currentDue;
 
       return {
         id: clientId,
@@ -219,12 +218,17 @@ export async function getClientsListView(
         engagementType: client.engagementType,
         amountPaise: client.amountPaise,
         status: client.status,
-        thisMonthStatus: monthStatus.status,
-        thisMonthPaidPaise: monthStatus.paidPaise,
-        thisMonthBilledPaise: monthStatus.billedPaise + monthStatus.carriedInPaise,
-        remainingDuePaise: totalDue,
-        nextDueDate: client.nextDueDate.toISOString(),
-        daysOverdue: monthStatus.daysOverdue,
+        currentPeriodLabel: current ? current.periodLabel : null,
+        currentStatus: current ? current.status : null,
+        currentPaidPaise: current ? current.paidPaise : 0,
+        currentBilledPaise: current ? current.billedPaise + current.carriedInPaise : 0,
+        openDuesCount: summary.openDues.length,
+        remainingDuePaise: summary.totalDuePaise,
+        // Derived from the open dues, never from the stored Client.nextDueDate —
+        // that field only moves on a manual edit and would otherwise keep
+        // reporting a client as overdue long after they had paid in full.
+        nextDueDate: summary.nextDueDate,
+        daysOverdue: summary.daysOverdue,
         lastPaymentAt: lastPayment ? lastPayment.paidAt.toISOString() : null,
         lastPaymentPaise: lastPayment ? lastPayment.amountPaise : null,
       };
@@ -239,39 +243,31 @@ export async function getClientsListView(
  * ONE call per page, internals parallelized). Returns null if the client
  * doesn't exist so the page can 404 instead of throwing.
  */
-export async function getClientDetail(clientId: string, monthKey: string) {
+export async function getClientDetail(clientId: string) {
   const client = await findClientById(clientId);
   if (!client) return null;
 
-  const [monthStatus, totalDue, lifetimePaid, history] = await Promise.all([
-    getClientMonthStatus(clientId, monthKey),
-    getClientTotalDue(clientId),
-    getClientLifetimePaid(clientId),
-    getClientHistory(clientId),
+  // ONE composed call for the whole page (Section 9), and one payments query
+  // for every period rather than one per period — the Dues tab, the History
+  // tab and the header all read from this same result, so they cannot
+  // disagree with each other.
+  const [summary, payments] = await Promise.all([
+    getClientDuesSummary(clientId),
+    findPaymentsByClient(clientId),
   ]);
 
-  const currentBilling = await findBillingByClientAndMonth(clientId, monthKey);
-  const trail = currentBilling
-    ? await findPaymentsByBilling(currentBilling._id.toString())
-    : [];
+  const trailByBillingId = new Map<string, typeof payments>();
+  for (const payment of payments) {
+    const key = payment.monthlyBillingId.toString();
+    const existing = trailByBillingId.get(key);
+    if (existing) existing.push(payment);
+    else trailByBillingId.set(key, [payment]);
+  }
 
-  return { client, monthStatus, totalDue, lifetimePaid, history, currentBilling, trail };
-}
+  const duesWithTrails = summary.dues.map((due) => ({
+    due,
+    trail: trailByBillingId.get(due.id) ?? [],
+  }));
 
-/** Section 7.4 "history" tab — one collapsible card per past month, each
- * with its own inner payment table. */
-export async function getClientHistoryWithTrails(clientId: string) {
-  const [history, billings] = await Promise.all([
-    getClientHistory(clientId),
-    findBillingsByClient(clientId),
-  ]);
-  const billingByMonth = new Map(billings.map((b) => [b.monthKey, b]));
-
-  return Promise.all(
-    history.map(async (monthStatus) => {
-      const billing = billingByMonth.get(monthStatus.monthKey);
-      const trail = billing ? await findPaymentsByBilling(billing._id.toString()) : [];
-      return { monthStatus, trail };
-    })
-  );
+  return { client, summary, duesWithTrails };
 }

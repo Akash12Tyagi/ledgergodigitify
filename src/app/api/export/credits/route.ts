@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/server/auth/guards";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { exportCreditsCsv } from "@/server/services/export.service";
+import { currentExportPeriod } from "@/server/services/export-period";
 import { logAudit } from "@/server/services/audit.service";
 import { AppError } from "@/lib/errors";
 import { statusForCode } from "@/lib/result";
@@ -21,7 +22,14 @@ export async function GET(request: Request) {
     const status = (searchParams.get("status") as "active" | "reversed" | "all" | null) ?? "active";
     const accountId = searchParams.get("accountId") ?? undefined;
 
-    const csv = await exportCreditsCsv({ category, status, ...(accountId ? { accountId } : {}) });
+    const period = await currentExportPeriod();
+    const csv = await exportCreditsCsv({
+      category,
+      status,
+      ...(accountId ? { accountId } : {}),
+      receivedFrom: period.startUTC,
+      receivedTo: period.endUTC,
+    });
 
     await logAudit({
       actorUserId: actor.id,

@@ -2,10 +2,14 @@ import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 
+// "Dues" is the default and the place work actually happens — every open
+// period with its own Record Payment button. The old "Current" tab showed
+// only the calendar month's billing, which for a 20th-to-20th client was
+// frequently nothing at all; its payment trail now lives per-period under
+// History.
 const TABS = [
-  { value: "current", label: "Current" },
-  { value: "history", label: "History" },
   { value: "dues", label: "Dues" },
+  { value: "history", label: "History" },
   { value: "activity", label: "Activity" },
 ] as const;
 

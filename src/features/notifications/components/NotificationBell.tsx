@@ -39,6 +39,11 @@ export function NotificationBell() {
       variant="ghost"
       size="icon"
       className="relative"
+      // The bell is a plain navigation link, so it renders as an <a>, not a
+      // <button>. Base UI assumes a native button unless told otherwise and
+      // would otherwise skip the keyboard/ARIA handling an <a> needs to
+      // behave like one.
+      nativeButton={false}
       render={<Link href="/notifications" aria-label="Notifications" />}
     >
       <Bell className="size-4" />

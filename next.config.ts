@@ -11,13 +11,15 @@ const withBundleAnalyzer = withBundleAnalyzerInit({
 });
 
 // Section 2.5 — exact security headers, applied to every route.
-// CSP connect-src is widened in development only, to allow the Turbopack HMR
-// websocket; production keeps the literal spec list.
+// CSP is widened in development only (the Turbopack HMR websocket, and
+// React's dev-mode use of eval() for reconstructing cross-environment
+// callstacks in the error overlay). Production keeps the literal spec list —
+// 'unsafe-eval' must never ship, and React does not use eval() there.
 const isDev = process.env.NODE_ENV === "development";
 
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https://res.cloudinary.com",
   `connect-src 'self' https://api.cloudinary.com${isDev ? " ws://localhost:* http://localhost:*" : ""}`,

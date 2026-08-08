@@ -186,7 +186,13 @@ export function SettingsForm({ initial }: { initial: SettingsInitial }) {
                     <Select value={String(field.value)} onValueChange={(v) => field.onChange(Number(v))}>
                       <FormControl>
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          {/* Value is the 1-based month number, so it needs
+                              mapping back to the month name. */}
+                          <SelectValue>
+                            {(v: string | null) =>
+                              v ? (MONTH_NAMES[Number(v) - 1] ?? v) : "Select a month"
+                            }
+                          </SelectValue>
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>

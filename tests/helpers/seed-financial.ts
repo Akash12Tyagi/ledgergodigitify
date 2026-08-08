@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 
 import { db } from "@/database/connection";
+import { monthKeyToRange } from "@/lib/dates";
 import { AccountModel } from "@/database/models/account.model";
 import { ClientModel } from "@/database/models/client.model";
 import { MonthlyBillingModel } from "@/database/models/monthly-billing.model";
@@ -65,10 +66,15 @@ export async function seedClient(
   });
 }
 
+/** Seeds one billing period. `periodStart`/`periodEnd` default to the
+ * calendar month named by `monthKey`, which keeps every month-shaped test
+ * reading naturally while still exercising the period-based code paths. */
 export async function seedBilling(
   clientId: Types.ObjectId,
   overrides: {
     monthKey?: string;
+    periodStart?: Date;
+    periodEnd?: Date;
     billedPaise?: number;
     carriedInPaise?: number;
     carriedOutPaise?: number;
@@ -79,9 +85,14 @@ export async function seedBilling(
   } = {}
 ) {
   await db();
+  const monthKey = overrides.monthKey ?? "2026-07";
+  const { startUTC, endUTC } = monthKeyToRange(monthKey);
+
   return MonthlyBillingModel.create({
     clientId,
-    monthKey: overrides.monthKey ?? "2026-07",
+    monthKey,
+    periodStart: overrides.periodStart ?? startUTC,
+    periodEnd: overrides.periodEnd ?? endUTC,
     billedPaise: overrides.billedPaise ?? 20_000_00,
     carriedInPaise: overrides.carriedInPaise ?? 0,
     carriedOutPaise: overrides.carriedOutPaise ?? 0,

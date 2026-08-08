@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { ACTIVE_REVERSED_STATUSES, TRANSACTION_DIRECTIONS, TRANSACTION_TYPES } from "@/constants/domain";
 
@@ -37,6 +38,4 @@ transactionSchema.index({ idempotencyKey: 1 }, { unique: true });
 
 export type TransactionDoc = InferSchemaType<typeof transactionSchema>;
 
-export const TransactionModel =
-  (mongoose.models.Transaction as mongoose.Model<TransactionDoc>) ??
-  mongoose.model<TransactionDoc>("Transaction", transactionSchema);
+export const TransactionModel = registerModel<TransactionDoc>("Transaction", transactionSchema);

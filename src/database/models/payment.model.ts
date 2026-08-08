@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { ACTIVE_REVERSED_STATUSES, PAYMENT_METHODS } from "@/constants/domain";
 import { attachmentMetaSchema } from "@/database/models/attachment-meta.schema";
@@ -47,6 +48,4 @@ paymentSchema.index({ idempotencyKey: 1 }, { unique: true });
 
 export type PaymentDoc = InferSchemaType<typeof paymentSchema>;
 
-export const PaymentModel =
-  (mongoose.models.Payment as mongoose.Model<PaymentDoc>) ??
-  mongoose.model<PaymentDoc>("Payment", paymentSchema);
+export const PaymentModel = registerModel<PaymentDoc>("Payment", paymentSchema);

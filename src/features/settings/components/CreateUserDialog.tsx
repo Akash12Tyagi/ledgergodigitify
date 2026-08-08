@@ -159,7 +159,8 @@ export function CreateUserDialog() {
                       <Select value={field.value} onValueChange={field.onChange}>
                         <FormControl>
                           <SelectTrigger className="w-full">
-                            <SelectValue />
+                            {/* Role values are already their own label. */}
+                            <SelectValue className="capitalize" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>

@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { AUDIT_ACTIONS, AUDIT_ENTITY_KINDS } from "@/constants/audit-actions";
 
@@ -29,6 +30,4 @@ auditLogSchema.index({ action: 1, createdAt: -1 });
 
 export type AuditLogDoc = InferSchemaType<typeof auditLogSchema>;
 
-export const AuditLogModel =
-  (mongoose.models.AuditLog as mongoose.Model<AuditLogDoc>) ??
-  mongoose.model<AuditLogDoc>("AuditLog", auditLogSchema);
+export const AuditLogModel = registerModel<AuditLogDoc>("AuditLog", auditLogSchema);

@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DrilldownCard } from "@/components/shared/DrilldownCard";
 import { AmountText } from "@/components/shared/AmountText";
-import { DashboardRangePicker } from "@/components/shared/DashboardRangePicker";
+import { PeriodRangePicker } from "@/components/shared/PeriodRangePicker";
 import { ReconciliationBanner } from "@/components/shared/ReconciliationBanner";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SparklineChartLazy } from "@/components/shared/charts/SparklineChartLazy";
@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardRangeData } from "@/server/services/financial-engine";
 import { getSettings } from "@/server/services/settings.service";
 import { requireUser } from "@/server/auth/guards";
-import { DASHBOARD_FROM_COOKIE, DASHBOARD_TO_COOKIE, resolveDashboardRange } from "@/lib/dashboard-range-context";
+import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
 import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
 import type { AccountStripItem, DueRow, TxRow } from "@/types/engine";
@@ -35,9 +35,9 @@ export default async function DashboardPage() {
   await requireUser("viewer");
   const cookieStore = await cookies();
   const currentRealMonth = toMonthKey(nowIST());
-  const { from: fromMonthKey, to: toMonthKeyValue } = resolveDashboardRange(
-    cookieStore.get(DASHBOARD_FROM_COOKIE)?.value,
-    cookieStore.get(DASHBOARD_TO_COOKIE)?.value,
+  const { from: fromMonthKey, to: toMonthKeyValue } = resolvePeriodRange(
+    cookieStore.get(PERIOD_FROM_COOKIE)?.value,
+    cookieStore.get(PERIOD_TO_COOKIE)?.value,
     currentRealMonth
   );
 
@@ -63,7 +63,7 @@ export default async function DashboardPage() {
       <PageHeader
         title="Dashboard"
         action={
-          <DashboardRangePicker
+          <PeriodRangePicker
             fromMonthKey={fromMonthKey}
             toMonthKey={toMonthKeyValue}
             minMonthKey={minMonthKey}

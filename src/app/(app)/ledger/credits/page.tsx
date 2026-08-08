@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 
 import { PageHeader } from "@/components/shared/PageHeader";
+import { PeriodRangePicker } from "@/components/shared/PeriodRangePicker";
 import { CreditsTableView } from "@/features/credits/components/CreditsTableView";
 import { listCredits } from "@/server/services/credits.service";
+import { getSettings } from "@/server/services/settings.service";
 import { requireUser } from "@/server/auth/guards";
+import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
+import { monthRangeToUtc, nowIST, toMonthKey } from "@/lib/dates";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import type { CreditCategory } from "@/constants/domain";
 
@@ -24,11 +29,33 @@ export default async function CreditsPage({
   const category = (params.category as CreditCategory | "all" | undefined) ?? "all";
   const status = (params.status as "active" | "reversed" | "all" | undefined) ?? "active";
 
-  const result = await listCredits({ category, status, page, pageSize });
+  // Scoped to the app-wide period, so this list and the Overview's Credits
+  // card always describe the same span of time.
+  const cookieStore = await cookies();
+  const { from, to } = resolvePeriodRange(
+    cookieStore.get(PERIOD_FROM_COOKIE)?.value,
+    cookieStore.get(PERIOD_TO_COOKIE)?.value,
+    toMonthKey(nowIST())
+  );
+  const { startUTC, endUTC } = monthRangeToUtc(from, to);
+
+  const [result, settings] = await Promise.all([
+    listCredits({ category, status, page, pageSize, receivedFrom: startUTC, receivedTo: endUTC }),
+    getSettings(),
+  ]);
 
   return (
     <div>
-      <PageHeader title="Credits" />
+      <PageHeader
+        title="Credits"
+        action={
+          <PeriodRangePicker
+            fromMonthKey={from}
+            toMonthKey={to}
+            minMonthKey={settings.goLiveDate ? toMonthKey(settings.goLiveDate) : undefined}
+          />
+        }
+      />
       <CreditsTableView
         rows={result.rows}
         total={result.total}

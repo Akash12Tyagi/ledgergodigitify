@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { CLIENT_ENGAGEMENT_TYPES, CLIENT_STATUSES } from "@/constants/domain";
 
@@ -59,6 +60,4 @@ clientSchema.index({ engagementType: 1, status: 1 });
 
 export type ClientDoc = InferSchemaType<typeof clientSchema>;
 
-export const ClientModel =
-  (mongoose.models.Client as mongoose.Model<ClientDoc>) ??
-  mongoose.model<ClientDoc>("Client", clientSchema);
+export const ClientModel = registerModel<ClientDoc>("Client", clientSchema);

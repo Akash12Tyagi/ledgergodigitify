@@ -1,6 +1,5 @@
 import { toCsv } from "@/lib/csv";
 import { paiseToRupeesPlain } from "@/lib/money";
-import { nowIST, toMonthKey } from "@/lib/dates";
 import { getClientsListView } from "@/server/services/clients.service";
 import { listExpenses } from "@/server/services/expenses.service";
 import { listCredits } from "@/server/services/credits.service";
@@ -18,7 +17,7 @@ import type { TxFilter } from "@/types/engine";
 const EXPORT_ALL_PAGE_SIZE = 1_000_000;
 
 export async function exportClientsCsv(filter: ClientListFilter): Promise<string> {
-  const rows = await getClientsListView(filter, toMonthKey(nowIST()), 1, EXPORT_ALL_PAGE_SIZE);
+  const rows = await getClientsListView(filter, 1, EXPORT_ALL_PAGE_SIZE);
   return toCsv(rows, [
     { header: "Name", value: (r) => r.name },
     { header: "Company", value: (r) => r.company ?? "" },
@@ -26,11 +25,13 @@ export async function exportClientsCsv(filter: ClientListFilter): Promise<string
     { header: "Engagement Type", value: (r) => r.engagementType },
     { header: "Amount (INR)", value: (r) => paiseToRupeesPlain(r.amountPaise) },
     { header: "Status", value: (r) => r.status },
-    { header: "This Month Status", value: (r) => r.thisMonthStatus },
-    { header: "This Month Paid (INR)", value: (r) => paiseToRupeesPlain(r.thisMonthPaidPaise) },
-    { header: "This Month Billed (INR)", value: (r) => paiseToRupeesPlain(r.thisMonthBilledPaise) },
+    { header: "Current Period", value: (r) => r.currentPeriodLabel ?? "" },
+    { header: "Current Period Status", value: (r) => r.currentStatus ?? "NO_DUES" },
+    { header: "Current Period Paid (INR)", value: (r) => paiseToRupeesPlain(r.currentPaidPaise) },
+    { header: "Current Period Billed (INR)", value: (r) => paiseToRupeesPlain(r.currentBilledPaise) },
+    { header: "Open Dues", value: (r) => r.openDuesCount },
     { header: "Remaining Due (INR)", value: (r) => paiseToRupeesPlain(r.remainingDuePaise) },
-    { header: "Next Due Date", value: (r) => r.nextDueDate },
+    { header: "Next Due Date", value: (r) => r.nextDueDate ?? "" },
     { header: "Days Overdue", value: (r) => r.daysOverdue },
     { header: "Last Payment At", value: (r) => r.lastPaymentAt ?? "" },
     {

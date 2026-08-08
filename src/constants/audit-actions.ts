@@ -20,7 +20,11 @@ export const AUDIT_ACTIONS = [
   "ACCOUNT_ARCHIVED",
   "ACCOUNT_OPENING_BALANCE_CHANGED",
   "ACCOUNT_DEFAULT_CHANGED",
+  "ACCOUNT_ADJUSTED",
   "BILLING_GENERATED",
+  "DUE_CREATED",
+  "DUE_UPDATED",
+  "DUE_DELETED",
   "SETTINGS_UPDATED",
   "RECONCILE_RUN",
   "RECONCILE_DRIFT_DETECTED",
@@ -42,6 +46,7 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 export const AUDIT_ENTITY_KINDS = [
   "client",
+  "billing",
   "payment",
   "expense",
   "credit",

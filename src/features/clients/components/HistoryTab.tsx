@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusBadge } from "@/components/shared/StatusBadge";
+import { StatusBadge, type DisplayStatus } from "@/components/shared/StatusBadge";
 import { formatINR } from "@/lib/money";
-import type { ClientMonthStatus } from "@/types/engine";
+import type { ClientDue } from "@/types/engine";
 
 type TrailPayment = {
   _id: unknown;
@@ -14,13 +14,14 @@ type TrailPayment = {
   status: string;
 };
 
-// Section 7.4 "history" tab — one card per past month, most recent first
-// (getClientHistory already sorts desc), with that month's payment table.
+// One card per billing period, newest first (getClientDues already sorts
+// desc), with that period's payment table — invoice number, receipt number,
+// method and which account the money landed in.
 export function HistoryTab({
   entries,
   accountNameById,
 }: {
-  entries: { monthStatus: ClientMonthStatus; trail: TrailPayment[] }[];
+  entries: { due: ClientDue; trail: TrailPayment[] }[];
   accountNameById: Map<string, string>;
 }) {
   if (entries.length === 0) {
@@ -29,22 +30,19 @@ export function HistoryTab({
 
   return (
     <div className="grid gap-3">
-      {entries.map(({ monthStatus, trail }) => (
-        <Card key={monthStatus.monthKey} size="sm">
+      {entries.map(({ due, trail }) => (
+        <Card key={due.id} size="sm">
           <CardHeader>
             <CardTitle className="flex items-center justify-between text-base">
-              <span>{monthStatus.monthKey}</span>
-              <StatusBadge status={monthStatus.status} />
+              <span>{due.periodLabel}</span>
+              <StatusBadge status={due.status as DisplayStatus} />
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
             <p className="text-muted-foreground">
-              Billed {formatINR(monthStatus.billedPaise)}
-              {monthStatus.carriedInPaise > 0
-                ? ` + ${formatINR(monthStatus.carriedInPaise)} carried`
-                : ""}{" "}
-              · Paid {formatINR(monthStatus.paidPaise)} · Remaining{" "}
-              {formatINR(monthStatus.remainingPaise)}
+              Billed {formatINR(due.billedPaise)}
+              {due.carriedInPaise > 0 ? ` + ${formatINR(due.carriedInPaise)} carried` : ""} · Paid{" "}
+              {formatINR(due.paidPaise)} · Remaining {formatINR(due.remainingPaise)}
             </p>
             {trail.length > 0 ? (
               <div className="overflow-x-auto rounded-lg border">
@@ -63,7 +61,9 @@ export function HistoryTab({
                     {trail.map((payment) => (
                       <tr
                         key={String(payment._id)}
-                        className={payment.status === "reversed" ? "text-muted-foreground line-through" : ""}
+                        className={
+                          payment.status === "reversed" ? "text-muted-foreground line-through" : ""
+                        }
                       >
                         <td className="px-2 py-1.5">{payment.invoiceNumber}</td>
                         <td className="px-2 py-1.5">{payment.receiptNumber}</td>
@@ -74,7 +74,9 @@ export function HistoryTab({
                           })}
                         </td>
                         <td className="px-2 py-1.5 capitalize">{payment.method.replace("_", " ")}</td>
-                        <td className="px-2 py-1.5">{accountNameById.get(String(payment.accountId)) ?? "—"}</td>
+                        <td className="px-2 py-1.5">
+                          {accountNameById.get(String(payment.accountId)) ?? "—"}
+                        </td>
                         <td className="px-2 py-1.5 text-right tabular-nums">
                           {formatINR(payment.amountPaise)}
                         </td>
@@ -83,7 +85,9 @@ export function HistoryTab({
                   </tbody>
                 </table>
               </div>
-            ) : null}
+            ) : (
+              <p className="text-xs text-muted-foreground">No payments recorded for this period.</p>
+            )}
           </CardContent>
         </Card>
       ))}

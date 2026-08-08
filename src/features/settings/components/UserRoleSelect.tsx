@@ -33,7 +33,7 @@ export function UserRoleSelect({ userId, role, isSelf }: { userId: string; role:
         disabled={isSelf}
       >
         <SelectTrigger className="w-28">
-          <SelectValue />
+          <SelectValue className="capitalize" />
         </SelectTrigger>
         <SelectContent>
           {USER_ROLES.map((r) => (

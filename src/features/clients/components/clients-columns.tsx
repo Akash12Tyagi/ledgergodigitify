@@ -5,7 +5,6 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { AmountText } from "@/components/shared/AmountText";
 import { StatusBadge, type DisplayStatus } from "@/components/shared/StatusBadge";
 import { formatINR } from "@/lib/money";
-import { daysOverdue as computeDaysOverdue } from "@/lib/dates";
 import type { ClientListRow } from "@/types/client";
 
 // Section 7.2 — the /clients table columns.
@@ -45,40 +44,63 @@ export const clientsColumns: ColumnDef<ClientListRow, unknown>[] = [
     ),
   },
   {
-    id: "thisMonth",
-    header: "This Month",
-    cell: ({ row }) => (
-      <StatusBadge
-        status={row.original.thisMonthStatus as DisplayStatus}
-        suffix={`· ${formatINR(row.original.thisMonthPaidPaise)}/${formatINR(row.original.thisMonthBilledPaise)}`}
-      />
-    ),
+    id: "currentPeriod",
+    header: "Current Period",
+    // `currentStatus === null` means the client genuinely has no due raised
+    // yet — shown as its own state rather than as a PENDING badge reading
+    // ₹0/₹0, which used to be indistinguishable from an unpaid period.
+    cell: ({ row }) =>
+      row.original.currentStatus === null ? (
+        <span className="text-sm text-muted-foreground">No dues raised</span>
+      ) : (
+        <div className="grid gap-0.5">
+          <StatusBadge
+            status={row.original.currentStatus as DisplayStatus}
+            suffix={`· ${formatINR(row.original.currentPaidPaise)}/${formatINR(row.original.currentBilledPaise)}`}
+          />
+          <span className="text-xs text-muted-foreground">{row.original.currentPeriodLabel}</span>
+        </div>
+      ),
   },
   {
     id: "remainingDue",
     header: "Remaining Due",
     cell: ({ row }) => (
-      <AmountText
-        paise={row.original.remainingDuePaise}
-        tone={row.original.daysOverdue > 0 ? "out" : "neutral"}
-      />
+      <div className="grid gap-0.5">
+        <AmountText
+          paise={row.original.remainingDuePaise}
+          tone={row.original.daysOverdue > 0 ? "out" : "neutral"}
+        />
+        {row.original.openDuesCount > 1 ? (
+          <span className="text-xs text-muted-foreground">
+            across {row.original.openDuesCount} periods
+          </span>
+        ) : null}
+      </div>
     ),
   },
   {
     id: "nextDue",
     header: "Next Due",
+    // Both the date and the overdue count come from the open dues the server
+    // already computed. Recomputing them here from the client's stored
+    // `nextDueDate` — which never advances after creation — is what made this
+    // column contradict the Dues page and keep showing "63 days overdue" for
+    // clients who had paid in full.
     cell: ({ row }) => {
-      const overdue = computeDaysOverdue(new Date(row.original.nextDueDate));
-      const dueDateLabel = new Date(row.original.nextDueDate).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-      });
-      return overdue > 0 ? (
-        <span className="text-money-out">
-          {overdue} day{overdue === 1 ? "" : "s"} overdue
+      const { nextDueDate, daysOverdue } = row.original;
+      if (!nextDueDate) return <span className="text-sm text-muted-foreground">—</span>;
+      if (daysOverdue > 0) {
+        return (
+          <span className="text-money-out">
+            {daysOverdue} day{daysOverdue === 1 ? "" : "s"} overdue
+          </span>
+        );
+      }
+      return (
+        <span>
+          {new Date(nextDueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
         </span>
-      ) : (
-        <span>{dueDateLabel}</span>
       );
     },
   },

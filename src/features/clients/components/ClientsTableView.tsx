@@ -73,7 +73,9 @@ export function ClientsTableView({
             onValueChange={(v) => setParam("status", v ?? "active")}
           >
             <SelectTrigger className="w-36">
-              <SelectValue />
+              <SelectValue
+                labels={{ active: "Active", paused: "Paused", archived: "Archived", all: "All" }}
+              />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="active">Active</SelectItem>
@@ -87,7 +89,9 @@ export function ClientsTableView({
             onValueChange={(v) => setParam("type", v ?? "all")}
           >
             <SelectTrigger className="w-36">
-              <SelectValue />
+              <SelectValue
+                labels={{ all: "All Types", retainer: "Retainer", one_time: "One-time" }}
+              />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>

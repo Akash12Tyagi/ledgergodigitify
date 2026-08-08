@@ -76,7 +76,11 @@ describe("getDuesList (Section 7.10)", () => {
     const dues = await getDuesList(AS_OF);
     const row = dues.overdue.find((r) => r.clientName === "Multi Month Co");
     expect(row).toBeDefined();
-    expect(row?.monthsOwed.sort()).toEqual(["2026-06", "2026-07"]);
+    // Each unpaid period stays its own line item — remainders never merge
+    // forward — so two open months produce two entries, oldest first.
+    expect(row?.periodsOwed).toHaveLength(2);
+    expect(row?.periodsOwed[0]).toContain("Jun");
+    expect(row?.periodsOwed[1]).toContain("Jul");
     expect(row?.remainingPaise).toBe(20_000_00);
   });
 

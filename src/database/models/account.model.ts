@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { ACCOUNT_STATUSES, ACCOUNT_TYPES } from "@/constants/domain";
 
@@ -38,6 +39,4 @@ accountSchema.index(
 
 export type AccountDoc = InferSchemaType<typeof accountSchema>;
 
-export const AccountModel =
-  (mongoose.models.Account as mongoose.Model<AccountDoc>) ??
-  mongoose.model<AccountDoc>("Account", accountSchema);
+export const AccountModel = registerModel<AccountDoc>("Account", accountSchema);

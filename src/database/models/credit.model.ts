@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { ACTIVE_REVERSED_STATUSES, CREDIT_CATEGORIES } from "@/constants/domain";
 import { attachmentMetaSchema } from "@/database/models/attachment-meta.schema";
@@ -39,6 +40,4 @@ creditSchema.index({ idempotencyKey: 1 }, { unique: true });
 
 export type CreditDoc = InferSchemaType<typeof creditSchema>;
 
-export const CreditModel =
-  (mongoose.models.Credit as mongoose.Model<CreditDoc>) ??
-  mongoose.model<CreditDoc>("Credit", creditSchema);
+export const CreditModel = registerModel<CreditDoc>("Credit", creditSchema);

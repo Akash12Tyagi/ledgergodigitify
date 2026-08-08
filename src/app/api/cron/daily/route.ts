@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     action: "CRON_RUN",
     entity: { kind: "system", id: null },
     after: summary,
-    summary: `Daily cron: ${rollover.created} billing(s) generated, ${dueReminders.upcomingCreated + dueReminders.overdueCreated} due reminder(s), month summary ${monthSummary.created ? "sent" : "skipped"}, ${reconciliation.lockedAccountIds.length} account(s) locked for reconciliation.`,
+    summary: `Daily cron: ${rollover.created} due(s) generated across ${rollover.scanned} retainer(s), ${dueReminders.upcomingCreated + dueReminders.overdueCreated} due reminder(s), month summary ${monthSummary.created ? "sent" : "skipped"}, ${reconciliation.lockedAccountIds.length} account(s) locked for reconciliation.`,
   });
 
   return NextResponse.json({ ok: true, startedAt, finishedAt: new Date().toISOString(), ...summary });

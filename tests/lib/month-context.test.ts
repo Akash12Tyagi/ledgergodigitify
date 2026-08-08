@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { isValidMonthKey, resolveMonthKey } from "@/lib/month-context";
+import { isValidMonthKey } from "@/lib/month-context";
+import { resolvePeriodRange } from "@/lib/period-range-context";
 
 describe("isValidMonthKey", () => {
   it("accepts well-formed YYYY-MM keys", () => {
@@ -20,13 +21,36 @@ describe("isValidMonthKey", () => {
   });
 });
 
-describe("resolveMonthKey", () => {
-  it("uses the cookie value when it's a well-formed monthKey", () => {
-    expect(resolveMonthKey("2026-03", "2026-07")).toBe("2026-03");
+describe("resolvePeriodRange", () => {
+  it("uses both cookies when they're well-formed", () => {
+    expect(resolvePeriodRange("2026-03", "2026-07", "2026-08")).toEqual({
+      from: "2026-03",
+      to: "2026-07",
+    });
   });
 
-  it("falls back when the cookie is missing or malformed (never trusts a bad cookie)", () => {
-    expect(resolveMonthKey(undefined, "2026-07")).toBe("2026-07");
-    expect(resolveMonthKey("garbage", "2026-07")).toBe("2026-07");
+  it("falls back to a single-month range when a cookie is missing or malformed", () => {
+    expect(resolvePeriodRange(undefined, undefined, "2026-07")).toEqual({
+      from: "2026-07",
+      to: "2026-07",
+    });
+    expect(resolvePeriodRange("garbage", "junk", "2026-07")).toEqual({
+      from: "2026-07",
+      to: "2026-07",
+    });
+  });
+
+  it("defaults `from` to `to` when only `to` is set", () => {
+    expect(resolvePeriodRange(undefined, "2026-05", "2026-08")).toEqual({
+      from: "2026-05",
+      to: "2026-05",
+    });
+  });
+
+  it("collapses an inverted range instead of rendering an empty period", () => {
+    expect(resolvePeriodRange("2026-09", "2026-04", "2026-08")).toEqual({
+      from: "2026-04",
+      to: "2026-04",
+    });
   });
 });

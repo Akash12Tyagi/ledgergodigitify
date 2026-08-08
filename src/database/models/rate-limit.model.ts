@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 // Section 10.2 — Mongo-backed sliding-window rate limiter storage.
 // TTL index auto-expires entries after 1 hour regardless of window length.
@@ -15,6 +16,4 @@ rateLimitSchema.index({ windowStart: 1 }, { expireAfterSeconds: 60 * 60 });
 
 export type RateLimitDoc = InferSchemaType<typeof rateLimitSchema>;
 
-export const RateLimitModel =
-  (mongoose.models.RateLimit as mongoose.Model<RateLimitDoc>) ??
-  mongoose.model<RateLimitDoc>("RateLimit", rateLimitSchema);
+export const RateLimitModel = registerModel<RateLimitDoc>("RateLimit", rateLimitSchema);

@@ -1,4 +1,5 @@
-import mongoose, { Schema, Types } from "mongoose";
+import { Schema, Types } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import {
   DUE_SOON_DAYS_DEFAULT,
@@ -37,6 +38,4 @@ const settingsSchema = new Schema<SettingsDoc>(
   { timestamps: true, collection: "settings" }
 );
 
-export const SettingsModel: mongoose.Model<SettingsDoc> =
-  (mongoose.models.Settings as mongoose.Model<SettingsDoc> | undefined) ??
-  mongoose.model<SettingsDoc>("Settings", settingsSchema);
+export const SettingsModel = registerModel<SettingsDoc>("Settings", settingsSchema);

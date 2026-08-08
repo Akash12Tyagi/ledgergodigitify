@@ -6,6 +6,7 @@ import { DrilldownCard } from "@/components/shared/DrilldownCard";
 import { AmountText } from "@/components/shared/AmountText";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { DevSumAssertion } from "@/components/shared/DevSumAssertion";
+import { GenerateDuesButton } from "@/features/dues/components/GenerateDuesButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDuesList } from "@/server/services/financial-engine";
 import { requireUser } from "@/server/auth/guards";
@@ -21,14 +22,15 @@ export const dynamic = "force-dynamic";
 // below it (an in-page anchor rather than a separate route, since the
 // bucket rows are already the full drill-down — no further pagination).
 export default async function LedgerDuesPage() {
-  await requireUser("viewer");
+  const actor = await requireUser("viewer");
   const dues = await getDuesList(todayIST());
 
   const sum = (rows: DueRow[]) => rows.reduce((s, r) => s + r.remainingPaise, 0);
+  const canGenerate = actor.role === "owner" || actor.role === "admin";
 
   return (
     <div>
-      <PageHeader title="Dues" />
+      <PageHeader title="Dues" action={canGenerate ? <GenerateDuesButton /> : null} />
 
       <DevSumAssertion label="Overdue" expectedPaise={dues.overdueTotalPaise} actualPaise={sum(dues.overdue)} />
       <DevSumAssertion label="Due Soon" expectedPaise={dues.dueSoonTotalPaise} actualPaise={sum(dues.dueSoon)} />
@@ -89,7 +91,9 @@ function DuesSection({ id, title, rows }: { id: string; title: string; rows: Due
                 <div>
                   <p className="font-medium">{row.clientName}</p>
                   <p className="text-xs text-muted-foreground">
-                    {row.monthsOwed.join(", ")}
+                    {row.periodsOwed.length > 1
+                      ? `${row.periodsOwed.length} periods · ${row.periodsOwed[0]} → ${row.periodsOwed[row.periodsOwed.length - 1]}`
+                      : row.periodsOwed[0]}
                     {row.daysOverdue > 0
                       ? ` · ${row.daysOverdue} day${row.daysOverdue === 1 ? "" : "s"} overdue`
                       : ""}

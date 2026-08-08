@@ -59,7 +59,7 @@ export function NotificationsTableView({
       <div className="flex items-center justify-between">
         <Select value={searchParams.get("isRead") ?? "all"} onValueChange={(v) => setParam("isRead", v ?? "all")}>
           <SelectTrigger className="w-40">
-            <SelectValue />
+            <SelectValue labels={{ all: "All", false: "Unread", true: "Read" }} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>

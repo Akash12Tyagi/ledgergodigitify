@@ -176,7 +176,12 @@ export function ClientForm() {
                   <Select value={field.value} onValueChange={field.onChange}>
                     <FormControl>
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue
+                          labels={{
+                            retainer: "Retainer (monthly)",
+                            one_time: "One-time project",
+                          }}
+                        />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>

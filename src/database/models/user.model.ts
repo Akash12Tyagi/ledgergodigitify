@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { USER_ROLES } from "@/constants/roles";
 
@@ -45,6 +46,4 @@ userSchema.index({ email: 1 }, { unique: true });
 
 export type UserDoc = InferSchemaType<typeof userSchema>;
 
-export const UserModel =
-  (mongoose.models.User as mongoose.Model<UserDoc>) ??
-  mongoose.model<UserDoc>("User", userSchema);
+export const UserModel = registerModel<UserDoc>("User", userSchema);

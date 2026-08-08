@@ -1,4 +1,5 @@
-import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { Schema, type InferSchemaType } from "mongoose";
+import { registerModel } from "@/database/models/register-model";
 
 import { ACTIVE_REVERSED_STATUSES, EXPENSE_CATEGORIES } from "@/constants/domain";
 import { attachmentMetaSchema } from "@/database/models/attachment-meta.schema";
@@ -41,6 +42,4 @@ expenseSchema.index({ idempotencyKey: 1 }, { unique: true });
 
 export type ExpenseDoc = InferSchemaType<typeof expenseSchema>;
 
-export const ExpenseModel =
-  (mongoose.models.Expense as mongoose.Model<ExpenseDoc>) ??
-  mongoose.model<ExpenseDoc>("Expense", expenseSchema);
+export const ExpenseModel = registerModel<ExpenseDoc>("Expense", expenseSchema);

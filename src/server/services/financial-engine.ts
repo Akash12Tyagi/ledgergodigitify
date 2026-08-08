@@ -1,5 +1,11 @@
 import { AppError } from "@/lib/errors";
-import { daysOverdue as computeDaysOverdue, monthKeyToRange, shiftMonthKey, todayIST } from "@/lib/dates";
+import {
+  daysOverdue as computeDaysOverdue,
+  monthKeyToRange,
+  nowIST,
+  shiftMonthKey,
+  todayIST,
+} from "@/lib/dates";
 import {
   findAccountById,
   findAccountsByIds,
@@ -10,9 +16,12 @@ import { findClientById, findClientsByIds } from "@/server/repositories/clients.
 import {
   findBillingsByClient,
   findBillingsByMonth,
+  findBillingsInMonthRange,
   findBillingsByStatus,
   sumBilledForMonth,
+  OPEN_BILLING_STATUSES,
 } from "@/server/repositories/monthly-billings.repository";
+import { formatPeriodLabel } from "@/lib/billing-period";
 import { sumExpensesByCategoryInRange } from "@/server/repositories/expenses.repository";
 import { getSettingsOrDefaults } from "@/server/repositories/settings.repository";
 import {
@@ -20,6 +29,7 @@ import {
   findRecentTransactions,
   findRecentTransactionsInRange,
   findTransactionsPaginated,
+  sumAdjustmentsNetForMonth,
   sumByTypeAndMonth,
   sumByTypeGroupedByMonth,
   sumInOutByAccountBeforeMonth,
@@ -32,7 +42,8 @@ import type {
   AccountReconcileResult,
   AccountStripItem,
   ActivityRow,
-  ClientMonthStatus,
+  ClientDue,
+  ClientDuesSummary,
   DashboardData,
   DueRow,
   DuesList,
@@ -88,20 +99,49 @@ export function computeOverpaymentSurplus(input: {
   return Math.max(0, input.paidPaise - target);
 }
 
-function billingToClientMonthStatus(
-  clientId: string,
-  billing: {
-    monthKey: string;
-    billedPaise: number;
-    carriedInPaise: number;
-    carriedOutPaise: number;
-    paidPaise: number;
-    dueDate: Date;
+/** Shape of a lean MonthlyBilling row, loose enough to accept both current
+ * documents and rows written before periods existed. */
+type BillingLike = {
+  _id: unknown;
+  clientId: unknown;
+  periodStart?: Date | null;
+  periodEnd?: Date | null;
+  monthKey: string;
+  billedPaise: number;
+  carriedInPaise: number;
+  carriedOutPaise: number;
+  paidPaise: number;
+  status: PayStatus;
+  dueDate: Date;
+  generatedBy: string;
+  note?: string | null;
+  version?: number;
+};
+
+/**
+ * Period bounds for a row, falling back to the calendar month for any row
+ * written before periods existed (scripts/migrate-billing-periods.ts
+ * backfills these properly; this keeps an un-migrated database readable
+ * instead of crashing the client screens).
+ */
+function periodBoundsOf(billing: BillingLike): { periodStart: Date; periodEnd: Date } {
+  if (billing.periodStart && billing.periodEnd) {
+    return { periodStart: billing.periodStart, periodEnd: billing.periodEnd };
   }
-): ClientMonthStatus {
+  const { startUTC, endUTC } = monthKeyToRange(billing.monthKey);
+  return { periodStart: billing.periodStart ?? startUTC, periodEnd: billing.periodEnd ?? endUTC };
+}
+
+function billingToClientDue(billing: BillingLike): ClientDue {
   const { status, remainingPaise } = deriveBillingStatus(billing);
+  const { periodStart, periodEnd } = periodBoundsOf(billing);
+
   return {
-    clientId,
+    id: String(billing._id),
+    clientId: String(billing.clientId),
+    periodStart: periodStart.toISOString(),
+    periodEnd: periodEnd.toISOString(),
+    periodLabel: formatPeriodLabel(periodStart, periodEnd),
     monthKey: billing.monthKey as MonthKey,
     billedPaise: billing.billedPaise,
     carriedInPaise: billing.carriedInPaise,
@@ -109,7 +149,10 @@ function billingToClientMonthStatus(
     remainingPaise,
     status,
     dueDate: billing.dueDate.toISOString(),
-    daysOverdue: computeDaysOverdue(billing.dueDate),
+    daysOverdue: remainingPaise > 0 ? computeDaysOverdue(billing.dueDate) : 0,
+    generatedBy: billing.generatedBy as ClientDue["generatedBy"],
+    note: billing.note ?? null,
+    version: billing.version ?? 0,
   };
 }
 
@@ -189,35 +232,53 @@ export async function getAccountActivity(
 // Clients / billing
 // ─────────────────────────────────────────────────────────────────────────
 
-export async function getClientMonthStatus(
-  clientId: string,
-  monthKey: string
-): Promise<ClientMonthStatus> {
+/**
+ * Everything the client screens need about what one client owes — read once
+ * from a single `findBillingsByClient` scan instead of four separate passes
+ * that could disagree with each other.
+ *
+ * `currentDue` is the due the UI should act on by default: the period
+ * containing today if one exists, otherwise the OLDEST still-open due (chase
+ * the oldest debt first), otherwise the newest due so a fully-settled client
+ * still shows something. It is deliberately not "this calendar month's due" —
+ * on a 20th-to-20th cycle there frequently isn't one, and the old
+ * month-keyed lookup returning null is exactly what used to hide the Record
+ * Payment button entirely.
+ */
+export async function getClientDuesSummary(clientId: string): Promise<ClientDuesSummary> {
   const client = await findClientById(clientId);
   if (!client) throw new AppError("NOT_FOUND", "Client not found");
 
-  const billings = await findBillingsByClient(clientId);
-  const billing = billings.find((b) => b.monthKey === monthKey);
+  const billings = await findBillingsByClient(clientId); // newest period first
+  const dues = billings.map(billingToClientDue);
+  const openDues = dues.filter((d) => d.remainingPaise > 0);
 
-  if (!billing) {
-    return {
-      clientId,
-      monthKey: monthKey as MonthKey,
-      billedPaise: 0,
-      carriedInPaise: 0,
-      paidPaise: 0,
-      remainingPaise: 0,
-      status: "PENDING",
-      dueDate: "",
-      daysOverdue: 0,
-    };
-  }
+  const nowMs = nowIST().getTime();
+  const containingToday = dues.find(
+    (d) => new Date(d.periodStart).getTime() <= nowMs && nowMs < new Date(d.periodEnd).getTime()
+  );
+  // openDues inherits the newest-first order, so the last entry is the oldest.
+  const oldestOpen = openDues.length > 0 ? openDues[openDues.length - 1] : undefined;
+  const currentDue = containingToday ?? oldestOpen ?? dues[0] ?? null;
 
-  return billingToClientMonthStatus(clientId, billing);
+  const earliestOpen = oldestOpen
+    ? openDues.reduce((earliest, d) =>
+        new Date(d.dueDate).getTime() < new Date(earliest.dueDate).getTime() ? d : earliest
+      )
+    : null;
+
+  return {
+    dues,
+    openDues,
+    currentDue,
+    totalDuePaise: openDues.reduce((sum, d) => sum + d.remainingPaise, 0),
+    lifetimePaidPaise: dues.reduce((sum, d) => sum + d.paidPaise, 0),
+    nextDueDate: earliestOpen ? earliestOpen.dueDate : null,
+    daysOverdue: earliestOpen ? earliestOpen.daysOverdue : 0,
+  };
 }
 
-/** Section 4.3 — Σ over all MonthlyBilling of max(0, billed+carriedIn−
- * carriedOut−paid). */
+/** Σ over every open due of max(0, billed+carriedIn−carriedOut−paid). */
 export async function getClientTotalDue(clientId: string): Promise<number> {
   const billings = await findBillingsByClient(clientId);
   return billings.reduce((sum, b) => sum + deriveBillingStatus(b).remainingPaise, 0);
@@ -228,10 +289,10 @@ export async function getClientLifetimePaid(clientId: string): Promise<number> {
   return billings.reduce((sum, b) => sum + b.paidPaise, 0);
 }
 
-/** All months, most recent first (Section 7.4 "history" tab). */
-export async function getClientHistory(clientId: string): Promise<ClientMonthStatus[]> {
+/** Every period, most recent first (the client "history" tab). */
+export async function getClientDues(clientId: string): Promise<ClientDue[]> {
   const billings = await findBillingsByClient(clientId); // already sorted desc
-  return billings.map((b) => billingToClientMonthStatus(clientId, b));
+  return billings.map(billingToClientDue);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -240,7 +301,7 @@ export async function getClientHistory(clientId: string): Promise<ClientMonthSta
 // ─────────────────────────────────────────────────────────────────────────
 
 async function scanOutstandingBillings() {
-  return findBillingsByStatus(["PENDING", "PARTIALLY_PAID"]);
+  return findBillingsByStatus(OPEN_BILLING_STATUSES);
 }
 
 /** Shared by getMonthOverview and getDuesList so both read the exact same
@@ -269,24 +330,31 @@ export async function getDuesList(asOfISTDate: string): Promise<DuesList> {
 
   const asOfMs = new Date(`${asOfISTDate}T00:00:00.000Z`).getTime();
 
-  // Group by client: one row per client, all outstanding months combined.
+  // Group by client: one row per client, every open PERIOD listed separately.
+  // Unpaid remainders are never merged into a later period, so a client owing
+  // three cycles genuinely contributes three entries here — that list is the
+  // answer to "which periods are open", and its sum is the client's total.
   const byClient = new Map<
     string,
-    { monthsOwed: MonthKey[]; remainingPaise: number; earliestDueDate: Date }
+    { periods: Array<{ label: string; startMs: number }>; remainingPaise: number; earliestDueDate: Date }
   >();
   for (const billing of billings) {
     const { remainingPaise } = deriveBillingStatus(billing);
     if (remainingPaise <= 0) continue;
+
+    const { periodStart, periodEnd } = periodBoundsOf(billing);
+    const entry = { label: formatPeriodLabel(periodStart, periodEnd), startMs: periodStart.getTime() };
+
     const clientId = billing.clientId.toString();
     const existing = byClient.get(clientId);
     if (!existing) {
       byClient.set(clientId, {
-        monthsOwed: [billing.monthKey as MonthKey],
+        periods: [entry],
         remainingPaise,
         earliestDueDate: billing.dueDate,
       });
     } else {
-      existing.monthsOwed.push(billing.monthKey as MonthKey);
+      existing.periods.push(entry);
       existing.remainingPaise += remainingPaise;
       if (billing.dueDate.getTime() < existing.earliestDueDate.getTime()) {
         existing.earliestDueDate = billing.dueDate;
@@ -312,7 +380,7 @@ export async function getDuesList(asOfISTDate: string): Promise<DuesList> {
     const row: DueRow = {
       clientId,
       clientName: client.name,
-      monthsOwed: agg.monthsOwed,
+      periodsOwed: agg.periods.sort((a, b) => a.startMs - b.startMs).map((p) => p.label),
       remainingPaise: agg.remainingPaise,
       dueDate: agg.earliestDueDate.toISOString(),
       daysOverdue: Math.max(0, -diffDays),
@@ -359,6 +427,7 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     collectedPaise,
     creditsPaise,
     expensesPaise,
+    adjustmentsNetPaise,
     categoryRows,
     outstanding,
   ] = await Promise.all([
@@ -374,6 +443,7 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     sumByTypeAndMonth(monthKey, ["PAYMENT_IN"]),
     sumByTypeAndMonth(monthKey, ["CREDIT_IN"]),
     sumByTypeAndMonth(monthKey, ["EXPENSE_OUT"]),
+    sumAdjustmentsNetForMonth(monthKey),
     sumExpensesByCategoryInRange(startUTC, endUTC),
     computeOutstandingAndOverdue(),
   ]);
@@ -394,7 +464,7 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     closingPositionPaise += closingPaise;
   }
 
-  const netCashFlowPaise = collectedPaise + creditsPaise - expensesPaise;
+  const netCashFlowPaise = collectedPaise + creditsPaise - expensesPaise + adjustmentsNetPaise;
   const expectedClosing = openingPositionPaise + netCashFlowPaise;
   const reconciliationError = closingPositionPaise !== expectedClosing;
 
@@ -412,6 +482,7 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
       collectedPaise: 0,
       creditsPaise: 0,
       expensesPaise: 0,
+      adjustmentsNetPaise: 0,
       netCashFlowPaise: 0,
       closingPositionPaise: 0,
       outstandingDuesPaise: 0,
@@ -429,6 +500,7 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     collectedPaise,
     creditsPaise,
     expensesPaise,
+    adjustmentsNetPaise,
     netCashFlowPaise,
     closingPositionPaise,
     outstandingDuesPaise: outstanding.outstandingPaise,
@@ -454,7 +526,22 @@ export type BilledClientRow = {
  * context but deliberately excluded from that sum, matching
  * sumBilledForMonth's own field selection. */
 export async function getBilledClientsForMonth(monthKey: string): Promise<BilledClientRow[]> {
-  const billings = await findBillingsByMonth(monthKey);
+  return billedRowsFrom(await findBillingsByMonth(monthKey));
+}
+
+/** Range sibling of getBilledClientsForMonth, for the From–To picker. Its
+ * rows sum to exactly getRangeOverview(from, to).billedPaise, because both
+ * read the same MonthlyBilling rows over the same month span. */
+export async function getBilledClientsForRange(
+  fromMonthKey: string,
+  toMonthKey: string
+): Promise<BilledClientRow[]> {
+  return billedRowsFrom(await findBillingsInMonthRange(fromMonthKey, toMonthKey));
+}
+
+async function billedRowsFrom(
+  billings: Awaited<ReturnType<typeof findBillingsByMonth>>
+): Promise<BilledClientRow[]> {
   const clients = await findClientsByIds(billings.map((b) => b.clientId.toString()));
   const nameById = new Map(clients.map((c) => [c._id.toString(), c.name]));
 
@@ -489,6 +576,7 @@ export async function getRangeOverview(
       collectedPaise: 0,
       creditsPaise: 0,
       expensesPaise: 0,
+      adjustmentsNetPaise: 0,
       netCashFlowPaise: 0,
       closingPositionPaise: 0,
       outstandingDuesPaise: 0,
@@ -538,6 +626,7 @@ export async function getRangeOverview(
     collectedPaise: overviews.reduce((s, o) => s + o.collectedPaise, 0),
     creditsPaise: overviews.reduce((s, o) => s + o.creditsPaise, 0),
     expensesPaise: overviews.reduce((s, o) => s + o.expensesPaise, 0),
+    adjustmentsNetPaise: overviews.reduce((s, o) => s + o.adjustmentsNetPaise, 0),
     netCashFlowPaise: overviews.reduce((s, o) => s + o.netCashFlowPaise, 0),
     closingPositionPaise: last.closingPositionPaise,
     outstandingDuesPaise: last.outstandingDuesPaise,

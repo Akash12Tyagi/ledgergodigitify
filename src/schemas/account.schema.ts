@@ -51,6 +51,26 @@ export const transferSchema = z
   });
 export type TransferInput = z.infer<typeof transferSchema>;
 
+/**
+ * A manual correction to an account's balance — a cash recount, a bank
+ * charge nobody recorded, an opening balance found to be wrong later.
+ *
+ * Deliberately NOT an edit of the stored balance or of `openingBalancePaise`:
+ * changing either would rewrite every historical figure derived from it and
+ * leave the audit trail describing a past that no longer matches the numbers.
+ * An adjustment is an ordinary dated transaction instead, so the correction
+ * itself is visible in account activity with who made it and why.
+ */
+export const adjustAccountSchema = z.strictObject({
+  accountId: objectIdString,
+  direction: z.enum(["IN", "OUT"]),
+  amountPaise: z.number().int().positive().max(MAX_ENTRY_PAISE),
+  reason: z.string().min(5).max(200),
+  occurredAt: z.date(),
+  idempotencyKey: z.string().min(1),
+});
+export type AdjustAccountInput = z.infer<typeof adjustAccountSchema>;
+
 // Section 6.5's reversal — both legs, identified by their shared
 // transactionGroupId.
 export const reverseTransferSchema = z.strictObject({

@@ -12,6 +12,7 @@ const TYPE_LABELS: Record<TxRow["type"], string> = {
   EXPENSE_OUT: "Expense",
   TRANSFER: "Transfer",
   REVERSAL: "Reversal",
+  ADJUSTMENT: "Adjustment",
 };
 
 // Section 4.6/7.5 — /ledger/overview's sibling-list columns. Read-only:

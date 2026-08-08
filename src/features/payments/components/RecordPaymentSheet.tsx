@@ -47,8 +47,17 @@ type RecordPaymentSheetProps = {
   clientId: string;
   monthlyBillingId: string;
   remainingPaise: number;
-  monthLabel: string;
-  trigger?: React.ReactNode;
+  periodLabel: string;
+  /**
+   * Base UI render prop — the ELEMENT the trigger is rendered as, for
+   * styling only. Pass a self-closing element (`<Button size="sm" />`); its
+   * children are ignored, so the label goes in `triggerLabel`.
+   *
+   * Passing an element WITH children here renders a <button> inside Base
+   * UI's own <button>, which is invalid HTML and fails hydration.
+   */
+  trigger?: React.ReactElement;
+  triggerLabel?: string;
 };
 
 type FormValues = Omit<RecordPaymentInput, "paidAt"> & { paidAt: Date | undefined };
@@ -70,8 +79,9 @@ export function RecordPaymentSheet({
   clientId,
   monthlyBillingId,
   remainingPaise,
-  monthLabel,
+  periodLabel,
   trigger,
+  triggerLabel,
 }: RecordPaymentSheetProps) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -172,8 +182,8 @@ export function RecordPaymentSheet({
         if (next) resetForSheetOpen();
       }}
     >
-      <SheetTrigger render={trigger as React.ReactElement}>
-        {!trigger ? <Button>Record Payment</Button> : undefined}
+      <SheetTrigger render={trigger ?? <Button />}>
+        {triggerLabel ?? "Record Payment"}
       </SheetTrigger>
       <SheetContent>
         {success ? (
@@ -193,7 +203,7 @@ export function RecordPaymentSheet({
           <>
             <SheetHeader>
               <SheetTitle>Record Payment</SheetTitle>
-              <SheetDescription>{monthLabel}</SheetDescription>
+              <SheetDescription>{periodLabel}</SheetDescription>
             </SheetHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(submit)} className="grid gap-4 px-4" noValidate>
@@ -251,7 +261,7 @@ export function RecordPaymentSheet({
                       <Select value={field.value} onValueChange={field.onChange}>
                         <FormControl>
                           <SelectTrigger className="w-full">
-                            <SelectValue />
+                            <SelectValue labels={METHOD_LABELS} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>

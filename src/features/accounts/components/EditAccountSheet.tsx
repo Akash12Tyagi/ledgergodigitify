@@ -143,7 +143,7 @@ export function EditAccountSheet({ account, role }: { account: AccountRow; role:
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger className="w-full">
-                          <SelectValue />
+                          <SelectValue labels={TYPE_LABELS} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>

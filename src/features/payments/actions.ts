@@ -10,11 +10,24 @@ import { recordPaymentSchema, reversePaymentSchema } from "@/schemas/payment.sch
 import * as paymentsService from "@/server/services/payments.service";
 import type { PayStatus } from "@/constants/domain";
 
-function revalidatePaymentPaths(clientId: string) {
+/**
+ * A payment moves money into a real account and changes what a client owes,
+ * so it invalidates both sides of the ledger.
+ *
+ * The account paths matter as much as the client ones: recording a payment
+ * calls incrementAccountBalance, so leaving /ledger/accounts out — as this
+ * did, while the expenses and credits actions correctly included it — meant
+ * account balances kept showing a pre-payment figure until something else
+ * happened to refresh them.
+ */
+function revalidatePaymentPaths(clientId: string, accountId?: string) {
   revalidatePath("/clients");
   revalidatePath(`/clients/${clientId}`);
   revalidatePath("/ledger/overview");
   revalidatePath("/ledger/dues");
+  revalidatePath("/ledger/billed");
+  revalidatePath("/ledger/accounts");
+  if (accountId) revalidatePath(`/ledger/accounts/${accountId}`);
   revalidatePath("/dashboard");
   revalidatePath("/notifications");
 }
@@ -35,7 +48,7 @@ export async function recordPaymentAction(input: unknown): Promise<ApiResult<Rec
     const actor = await requireUser("staff");
     const parsed = parseActionInput(recordPaymentSchema, input);
     const result = await paymentsService.recordPayment(parsed, actor);
-    revalidatePaymentPaths(parsed.clientId);
+    revalidatePaymentPaths(parsed.clientId, parsed.accountId);
     return {
       paymentId: result.payment._id.toString(),
       receiptNumber: result.payment.receiptNumber,
@@ -54,7 +67,10 @@ export async function reversePaymentAction(input: unknown): Promise<ApiResult<Re
     const actor = await requireUser("admin");
     const parsed = parseActionInput(reversePaymentSchema, input);
     const result = await paymentsService.reversePayment(parsed, actor);
-    revalidatePaymentPaths(result.payment.clientId.toString());
+    revalidatePaymentPaths(
+      result.payment.clientId.toString(),
+      result.payment.accountId.toString()
+    );
     return {
       paymentId: result.payment._id.toString(),
       receiptNumber: result.payment.receiptNumber,

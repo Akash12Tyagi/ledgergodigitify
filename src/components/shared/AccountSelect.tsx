@@ -59,7 +59,17 @@ export function AccountSelect({
   return (
     <Select value={value} onValueChange={(next) => onChange(next ?? "")} disabled={disabled}>
       <SelectTrigger className="w-full">
-        <SelectValue placeholder="Select an account" />
+        {/* Base UI's Select.Value renders the raw VALUE unless given a
+            formatter — which here is the account's ObjectId. The selected
+            item's children are not reused for the trigger, so the label has
+            to be resolved explicitly. */}
+        <SelectValue placeholder="Select an account">
+          {(selected: string | null) => {
+            const account = accounts.find((a) => a.id === selected);
+            if (!account) return "Select an account";
+            return `${account.name} — ${formatINR(account.currentBalancePaise)}`;
+          }}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {accounts.map((account) => (

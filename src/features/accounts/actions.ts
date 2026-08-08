@@ -6,8 +6,15 @@ import { requireUser } from "@/server/auth/guards";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { parseActionInput } from "@/lib/validate-action";
 import { runAction, type ApiResult } from "@/lib/result";
-import { createAccountSchema, reverseTransferSchema, transferSchema, updateAccountSchema } from "@/schemas/account.schema";
+import {
+  adjustAccountSchema,
+  createAccountSchema,
+  reverseTransferSchema,
+  transferSchema,
+  updateAccountSchema,
+} from "@/schemas/account.schema";
 import * as accountsService from "@/server/services/accounts.service";
+import * as adjustmentsService from "@/server/services/adjustments.service";
 import * as transfersService from "@/server/services/transfers.service";
 import { getAccountActivity } from "@/server/services/financial-engine";
 import type { TxFilter } from "@/types/engine";
@@ -119,6 +126,21 @@ export async function setDefaultAccountAction(accountId: string): Promise<ApiRes
     await accountsService.setDefaultAccount(accountId, actor);
     revalidateAccountPaths(accountId);
     return null;
+  });
+}
+
+export type AdjustAccountResult = { transactionId: string; accountNewBalance: number };
+
+/** Correcting a balance is a structural change to the books — same role bar
+ * as transfers and archiving. */
+export async function adjustAccountAction(input: unknown): Promise<ApiResult<AdjustAccountResult>> {
+  return runAction(async () => {
+    await checkRateLimit("mutation", "adjustAccount");
+    const actor = await requireUser("admin");
+    const parsed = parseActionInput(adjustAccountSchema, input);
+    const result = await adjustmentsService.adjustAccount(parsed, actor);
+    revalidateAccountPaths(parsed.accountId);
+    return result;
   });
 }
 

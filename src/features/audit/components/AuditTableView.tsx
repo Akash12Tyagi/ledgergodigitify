@@ -37,7 +37,7 @@ export function AuditTableView({
       <div className="flex justify-end">
         <Select value={searchParams.get("entityKind") ?? "all"} onValueChange={(v) => setEntityKind(v ?? "all")}>
           <SelectTrigger className="w-40">
-            <SelectValue />
+            <SelectValue labels={{ all: "All entities" }} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All entities</SelectItem>

@@ -218,9 +218,9 @@ describe("clients.service", () => {
     const total = await countClientsFiltered({ status: "active" });
     expect(total).toBe(5);
 
-    const page1 = await getClientsListView({ status: "active" }, "2026-07", 1, 2);
-    const page2 = await getClientsListView({ status: "active" }, "2026-07", 2, 2);
-    const page3 = await getClientsListView({ status: "active" }, "2026-07", 3, 2);
+    const page1 = await getClientsListView({ status: "active" }, 1, 2);
+    const page2 = await getClientsListView({ status: "active" }, 2, 2);
+    const page3 = await getClientsListView({ status: "active" }, 3, 2);
 
     expect(page1.map((r) => r.name)).toEqual(["Alpha Co", "Bravo Co"]);
     expect(page2.map((r) => r.name)).toEqual(["Charlie Co", "Delta Co"]);

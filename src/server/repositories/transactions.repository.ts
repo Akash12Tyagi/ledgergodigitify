@@ -241,6 +241,25 @@ export async function sumByTypeAndMonth(
   return result?.total ?? 0;
 }
 
+/**
+ * Net effect of manual account ADJUSTMENTs on a month: Σ(IN) − Σ(OUT).
+ *
+ * Adjustments move a real account balance, so the month overview's ledger
+ * equation (closing == opening + net) only holds if they are counted as a
+ * flow too. Direction-aware — unlike sumByTypeAndMonth, which sums raw
+ * amounts — because a single type carries both signs here.
+ */
+export async function sumAdjustmentsNetForMonth(monthKey: string): Promise<number> {
+  await db();
+  const rows = await TransactionModel.aggregate<{ _id: "IN" | "OUT"; total: number }>([
+    { $match: { monthKey, type: "ADJUSTMENT", status: "active" } },
+    { $group: { _id: "$direction", total: { $sum: "$amountPaise" } } },
+  ]);
+  let net = 0;
+  for (const row of rows) net += row._id === "IN" ? row.total : -row.total;
+  return net;
+}
+
 /** Grouped version of sumByTypeAndMonth for the 6-month sparkline — one
  * query instead of 12 (Section 9: zero N+1). */
 export async function sumByTypeGroupedByMonth(
@@ -293,7 +312,16 @@ function buildTxMatch(filter: TxFilter): Record<string, unknown> {
   if (filter.accountId) match.accountId = oid(filter.accountId);
   if (filter.clientId) match.clientId = oid(filter.clientId);
   if (filter.type?.length) match.type = { $in: filter.type };
-  if (filter.monthKey) match.monthKey = filter.monthKey;
+  // A month RANGE wins over a single month, so a caller can pass both
+  // without the narrower one silently overriding the picker's selection.
+  if (filter.monthKeyFrom || filter.monthKeyTo) {
+    const monthRange: Record<string, string> = {};
+    if (filter.monthKeyFrom) monthRange.$gte = filter.monthKeyFrom;
+    if (filter.monthKeyTo) monthRange.$lte = filter.monthKeyTo;
+    match.monthKey = monthRange;
+  } else if (filter.monthKey) {
+    match.monthKey = filter.monthKey;
+  }
   if (filter.from || filter.to) {
     const range: Record<string, Date> = {};
     if (filter.from) range.$gte = filter.from;
