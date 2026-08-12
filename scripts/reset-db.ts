@@ -56,6 +56,9 @@ const DATA_COLLECTIONS = new Set([
   "payments",
   "transactions",
   "expenses",
+  "expensetemplates", // recurring-expense definitions
+  "borrowings", // money lent out
+  "borrowrepayments",
   "credits",
   "notifications",
   "auditlogs",

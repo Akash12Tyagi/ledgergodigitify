@@ -16,6 +16,8 @@ const TYPE_LABELS: Record<ActivityRow["type"], string> = {
   TRANSFER: "Transfer",
   REVERSAL: "Reversal",
   ADJUSTMENT: "Adjustment",
+  LOAN_OUT: "Lent",
+  LOAN_REPAY_IN: "Loan repaid",
 };
 
 // Section 7.8 — /ledger/accounts/[id] activity table columns.

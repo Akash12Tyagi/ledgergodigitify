@@ -6,6 +6,7 @@ import { AppError } from "@/lib/errors";
 import { isTheme, THEME_COOKIE } from "@/lib/theme";
 import { AppSidebar } from "@/components/shared/AppSidebar";
 import { AppTopbar } from "@/components/shared/AppTopbar";
+import { getPendingExpenseCount } from "@/server/services/expenses.service";
 
 // Section 10.4 — the proxy's session-cookie check is presence-level only;
 // this layout is the AUTHORITATIVE check, re-reading the session (and,
@@ -25,9 +26,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const cookieTheme = cookieStore.get(THEME_COOKIE)?.value;
   const theme = isTheme(cookieTheme) ? cookieTheme : "light";
 
+  // Resolved here rather than inside the sidebar so the shell stays a
+  // client component with no data access of its own (Section 3 layering).
+  const pendingExpenses = await getPendingExpenseCount();
+
   return (
     <div className="flex h-screen overflow-hidden">
-      <AppSidebar role={user.role} />
+      <AppSidebar role={user.role} badges={{ pendingExpenses }} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <AppTopbar name={user.name} role={user.role} theme={theme} />
         <main id="main-content" className="flex-1 overflow-y-auto">

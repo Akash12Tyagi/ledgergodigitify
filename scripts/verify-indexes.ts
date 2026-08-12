@@ -58,6 +58,8 @@ async function main() {
   const { AccountModel } = await import("@/database/models/account.model");
   const { TransactionModel } = await import("@/database/models/transaction.model");
   const { ExpenseModel } = await import("@/database/models/expense.model");
+  const { ExpenseTemplateModel } = await import("@/database/models/expense-template.model");
+  const { BorrowingModel } = await import("@/database/models/borrowing.model");
   const { CreditModel } = await import("@/database/models/credit.model");
   const { NotificationModel } = await import("@/database/models/notification.model");
   const { AuditLogModel } = await import("@/database/models/audit-log.model");
@@ -131,6 +133,22 @@ async function main() {
     {
       label: "expenses {accountId:1,spentAt:-1} — account activity filtered to expenses",
       run: () => explainOf(ExpenseModel.find({ accountId: oid }).sort({ spentAt: -1 })),
+    },
+    {
+      label: "expenses {status:1,spentAt:-1} — the approvals queue",
+      run: () => explainOf(ExpenseModel.find({ status: "pending" }).sort({ spentAt: -1 })),
+    },
+    {
+      label: "expenses {templateId:1,periodStart:1} — rollover's latest-period lookup",
+      run: () => explainOf(ExpenseModel.find({ templateId: oid }).sort({ periodStart: -1 })),
+    },
+    {
+      label: "expensetemplates {status:1} — rollover scan of active templates",
+      run: () => explainOf(ExpenseTemplateModel.find({ status: "active" })),
+    },
+    {
+      label: "borrowings {status:1,lentAt:-1} — /ledger/borrowers default list",
+      run: () => explainOf(BorrowingModel.find({ status: "open" }).sort({ lentAt: -1 })),
     },
     {
       label: "credits {category:1,receivedAt:-1} — /ledger/credits filtered list",

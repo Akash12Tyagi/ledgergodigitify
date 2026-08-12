@@ -19,6 +19,8 @@ const TYPE_OPTIONS: { value: TransactionType | "all"; label: string }[] = [
   { value: "CREDIT_IN", label: "Credits" },
   { value: "EXPENSE_OUT", label: "Expenses" },
   { value: "TRANSFER", label: "Transfers" },
+  { value: "LOAN_OUT", label: "Lent out" },
+  { value: "LOAN_REPAY_IN", label: "Loan repayments" },
   { value: "REVERSAL", label: "Reversals" },
   { value: "ADJUSTMENT", label: "Adjustments" },
 ];

@@ -11,7 +11,10 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { SparklineChartLazy } from "@/components/shared/charts/SparklineChartLazy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardRangeData } from "@/server/services/financial-engine";
+import { getPendingExpenseCount } from "@/server/services/expenses.service";
+import { getOutstandingBorrowedTotal } from "@/server/services/borrowings.service";
 import { getSettings } from "@/server/services/settings.service";
+import { KpiCard } from "@/components/shared/KpiCard";
 import { requireUser } from "@/server/auth/guards";
 import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
 import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
@@ -41,9 +44,11 @@ export default async function DashboardPage() {
     currentRealMonth
   );
 
-  const [data, settings] = await Promise.all([
+  const [data, settings, pendingExpenses, lentOutPaise] = await Promise.all([
     getDashboardRangeData(fromMonthKey, toMonthKeyValue),
     getSettings(),
+    getPendingExpenseCount(),
+    getOutstandingBorrowedTotal(),
   ]);
   const { overview } = data;
   // The picker's only lower bound is an explicitly configured go-live date
@@ -77,43 +82,87 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <>
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <DrilldownCard
-              label="Outstanding Dues"
-              value={formatINR(overview.outstandingDuesPaise)}
-              href="/ledger/dues"
-              ariaLabel={`View outstanding dues, totalling ${formatINR(overview.outstandingDuesPaise)}`}
-              tone={overview.outstandingDuesPaise > 0 ? "warn" : "neutral"}
-            />
-            <DrilldownCard
-              label="Overdue"
-              value={formatINR(overview.overduePaise)}
-              href="/ledger/dues"
-              ariaLabel={`View overdue dues, totalling ${formatINR(overview.overduePaise)}`}
-              tone={overview.overduePaise > 0 ? "danger" : "neutral"}
-            />
-            <DrilldownCard
-              label={`Collected — ${rangeLabel}`}
-              value={formatINR(overview.collectedPaise)}
-              href={`/ledger/overview?type=PAYMENT_IN`}
-              ariaLabel={`View payments collected in this period, totalling ${formatINR(overview.collectedPaise)}`}
-            />
-            <DrilldownCard
-              label={`Expenses — ${rangeLabel}`}
-              value={formatINR(overview.expensesPaise)}
-              href={`/ledger/overview?type=EXPENSE_OUT`}
-              ariaLabel={`View expenses in this period, totalling ${formatINR(overview.expensesPaise)}`}
-              tone={overview.expensesPaise > 0 ? "warn" : "neutral"}
-            />
-          </div>
+          {/* Things a person has to DO, above everything they merely have
+              to know. Rendered only when non-empty — a permanent strip
+              saying "0 things need attention" is noise that trains people
+              to skip the row that will one day matter. */}
+          <AttentionStrip
+            pendingExpenses={pendingExpenses}
+            overdueDuesPaise={overview.overduePaise}
+          />
 
-          {data.accounts.length > 0 ? (
-            <div className="mb-6 flex flex-wrap gap-3">
-              {data.accounts.map((account) => (
-                <AccountChip key={account.accountId} account={account} />
-              ))}
+          {/* Cash first, and stated as one number. The old layout opened
+              with Outstanding Dues — money that has NOT arrived — so the
+              most prominent figure on the dashboard was the one you cannot
+              spend. */}
+          <section className="mb-6 grid gap-2">
+            <h2 className="text-sm font-medium">Money you have</h2>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,18rem)_1fr]">
+              <KpiCard
+                label="Across all accounts"
+                value={<AmountText paise={overview.closingPositionPaise} tone="neutral" />}
+              />
+              {data.accounts.length > 0 ? (
+                <div className="flex flex-wrap gap-3">
+                  {data.accounts.map((account) => (
+                    <AccountChip key={account.accountId} account={account} />
+                  ))}
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          </section>
+
+          {/* Deliberately separate from the cash block: none of this is
+              money you can spend today. */}
+          <section className="mb-6 grid gap-2">
+            <h2 className="text-sm font-medium">Owed to you</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <DrilldownCard
+                label="Outstanding dues"
+                value={formatINR(overview.outstandingDuesPaise)}
+                href="/ledger/dues"
+                ariaLabel={`View outstanding dues, totalling ${formatINR(overview.outstandingDuesPaise)}`}
+                tone={overview.outstandingDuesPaise > 0 ? "warn" : "neutral"}
+              />
+              <DrilldownCard
+                label="Overdue from clients"
+                value={formatINR(overview.overduePaise)}
+                href="/ledger/dues"
+                ariaLabel={`View overdue dues, totalling ${formatINR(overview.overduePaise)}`}
+                tone={overview.overduePaise > 0 ? "danger" : "neutral"}
+              />
+              <DrilldownCard
+                label="Lent to people"
+                value={formatINR(lentOutPaise)}
+                href="/ledger/borrowers"
+                ariaLabel={`View money lent out, totalling ${formatINR(lentOutPaise)}`}
+                tone={lentOutPaise > 0 ? "warn" : "neutral"}
+              />
+            </div>
+          </section>
+
+          <section className="mb-6 grid gap-2">
+            <h2 className="text-sm font-medium">Cash movement — {rangeLabel}</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <DrilldownCard
+                label="Collected"
+                value={formatINR(overview.collectedPaise)}
+                href={`/ledger/overview?type=PAYMENT_IN`}
+                ariaLabel={`View payments collected in this period, totalling ${formatINR(overview.collectedPaise)}`}
+              />
+              <DrilldownCard
+                label="Expenses"
+                value={formatINR(overview.expensesPaise)}
+                href={`/ledger/overview?type=EXPENSE_OUT`}
+                ariaLabel={`View expenses in this period, totalling ${formatINR(overview.expensesPaise)}`}
+                tone={overview.expensesPaise > 0 ? "warn" : "neutral"}
+              />
+              <KpiCard
+                label="Net change"
+                value={<AmountText paise={overview.netCashFlowPaise} tone="auto" showSign />}
+              />
+            </div>
+          </section>
 
           <div className="mb-6 grid gap-4 lg:grid-cols-2">
             <Card>
@@ -161,6 +210,54 @@ export default async function DashboardPage() {
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+/** The "do something" row. Each item is a link to the screen where the
+ * doing happens, not just a number — a count you cannot act on from where
+ * you read it is a dead end. */
+function AttentionStrip({
+  pendingExpenses,
+  overdueDuesPaise,
+}: {
+  pendingExpenses: number;
+  overdueDuesPaise: number;
+}) {
+  const items: { href: string; text: string; tone: "warn" | "danger" }[] = [];
+
+  if (pendingExpenses > 0) {
+    items.push({
+      href: "/ledger/expenses?status=pending",
+      text: `${pendingExpenses} expense${pendingExpenses === 1 ? "" : "s"} waiting for approval`,
+      tone: "warn",
+    });
+  }
+  if (overdueDuesPaise > 0) {
+    items.push({
+      href: "/ledger/dues",
+      text: `${formatINR(overdueDuesPaise)} overdue from clients`,
+      tone: "danger",
+    });
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mb-6 flex flex-wrap gap-2">
+      {items.map((item) => (
+        <Link
+          key={item.href}
+          href={item.href}
+          className={
+            item.tone === "danger"
+              ? "flex items-center gap-2 rounded-md border border-money-out/30 bg-money-out/5 px-3 py-2 text-sm font-medium text-money-out hover:bg-money-out/10"
+              : "flex items-center gap-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-sm font-medium text-warn hover:bg-warn/10"
+          }
+        >
+          {item.text}
+        </Link>
+      ))}
     </div>
   );
 }

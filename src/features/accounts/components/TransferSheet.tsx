@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
-import { CheckCircle2 } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -118,7 +118,10 @@ export function TransferSheet({ role }: { role: UserRole }) {
         if (next) resetForOpen();
       }}
     >
-      <SheetTrigger render={<Button variant="outline" />}>Transfer</SheetTrigger>
+      <SheetTrigger render={<Button variant="outline" className="gap-1.5" />}>
+        <ArrowLeftRight className="size-4" />
+        Move money
+      </SheetTrigger>
       <SheetContent>
         {success ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -134,8 +137,11 @@ export function TransferSheet({ role }: { role: UserRole }) {
         ) : (
           <>
             <SheetHeader>
-              <SheetTitle>Transfer between accounts</SheetTitle>
-              <SheetDescription>Both legs are recorded atomically on the ledger.</SheetDescription>
+              <SheetTitle>Move money between accounts</SheetTitle>
+              <SheetDescription>
+                Cash deposited into the bank, bank to UPI wallet, and so on. Your total money does
+                not change — only where it sits. Both legs are recorded atomically on the ledger.
+              </SheetDescription>
             </SheetHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(submit)} className="grid gap-4 px-4" noValidate>

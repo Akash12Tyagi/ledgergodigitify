@@ -87,6 +87,12 @@ export interface MonthOverview {
    * otherwise closing !== opening + net and the whole month would blank out
    * behind the reconciliation banner. */
   adjustmentsNetPaise: number;
+  /** Cash handed out as loans this period. Real money leaving, but not an
+   * expense — it became a receivable. In the equation for the same reason
+   * adjustments are: it moves account balances. */
+  lentPaise: number;
+  /** Loan principal repaid to us this period. */
+  loanRepaidPaise: number;
   netCashFlowPaise: number;
   closingPositionPaise: number;
   outstandingDuesPaise: number;

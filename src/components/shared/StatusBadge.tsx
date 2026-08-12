@@ -4,7 +4,21 @@ import type { PayStatus } from "@/constants/domain";
 // Section 12 — PENDING slate · PARTIALLY_PAID amber · FULLY_PAID green ·
 // OVERPAID blue · OVERDUE red. Badge always contains TEXT + color (never
 // color alone) for accessibility.
-export type DisplayStatus = PayStatus | "OVERDUE" | "ACTIVE" | "PAUSED" | "ARCHIVED";
+export type DisplayStatus =
+  | PayStatus
+  | "OVERDUE"
+  | "ACTIVE"
+  | "PAUSED"
+  | "ARCHIVED"
+  // Expense lifecycle (Section 6.3.3). REVERSED and CANCELLED are kept
+  // distinct from ARCHIVED because they answer different questions: money
+  // moved and was undone, versus money never moved at all.
+  | "REVERSED"
+  | "CANCELLED"
+  // Borrowings. Deliberately NOT reusing PENDING: in this app that word
+  // already means "waiting for someone to approve it", and a loan that is
+  // simply not yet repaid is not waiting on anybody.
+  | "OPEN";
 
 const LABELS: Record<DisplayStatus, string> = {
   PENDING: "Pending",
@@ -15,6 +29,9 @@ const LABELS: Record<DisplayStatus, string> = {
   ACTIVE: "Active",
   PAUSED: "Paused",
   ARCHIVED: "Archived",
+  REVERSED: "Reversed",
+  CANCELLED: "Cancelled",
+  OPEN: "Open",
 };
 
 const CLASSES: Record<DisplayStatus, string> = {
@@ -26,6 +43,9 @@ const CLASSES: Record<DisplayStatus, string> = {
   ACTIVE: "bg-money-in/10 text-money-in",
   PAUSED: "bg-warn/10 text-warn",
   ARCHIVED: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  REVERSED: "bg-money-out/10 text-money-out",
+  CANCELLED: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  OPEN: "bg-warn/10 text-warn",
 };
 
 export function StatusBadge({

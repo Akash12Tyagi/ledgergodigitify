@@ -4,19 +4,25 @@ import { AppError } from "@/lib/errors";
 import { withDbTransaction } from "@/lib/db-transaction";
 import { runWithIdempotency } from "@/lib/idempotency";
 import { isAfterTodayIST, toMonthKey, todayIST } from "@/lib/dates";
+import { formatPeriodLabel } from "@/lib/billing-period";
 import { formatINR } from "@/lib/money";
 import { stampAttachments } from "@/lib/attachments";
+import type { ExpenseStatus } from "@/constants/domain";
 import {
   findAccountById,
   findAccountsByIds,
   incrementAccountBalance,
 } from "@/server/repositories/accounts.repository";
 import {
+  countPendingExpenses,
   findExpenseByIdempotencyKey,
   findExpenseById,
   findExpensesPaginated,
   insertExpense,
+  markExpenseApproved,
   markExpenseReversed,
+  markPendingExpenseCancelled,
+  updatePendingExpenseOptimistic,
   type ExpenseListFilter,
 } from "@/server/repositories/expenses.repository";
 
@@ -26,7 +32,13 @@ import { getSettingsOrDefaults } from "@/server/repositories/settings.repository
 import { logAudit } from "@/server/services/audit.service";
 import { notify } from "@/server/services/notifications.service";
 import type { AuthedUser } from "@/server/auth/guards";
-import type { CreateExpenseInput, ReverseExpenseInput } from "@/schemas/expense.schema";
+import type {
+  ApproveExpenseInput,
+  CancelPendingExpenseInput,
+  CreateExpenseInput,
+  ReverseExpenseInput,
+  UpdatePendingExpenseInput,
+} from "@/schemas/expense.schema";
 import type { ExpenseRow } from "@/types/expense";
 
 export type { ExpenseRow };
@@ -49,9 +61,13 @@ export async function listExpenses(filter: ExpenseListFilter) {
     accountName: nameById.get(r.accountId.toString()) ?? "",
     spentAt: r.spentAt.toISOString(),
     note: r.note ?? null,
-    status: r.status as "active" | "reversed",
+    status: r.status as ExpenseStatus,
     reversedReason: r.reversedReason ?? null,
     overrideNegativeBalance: r.overrideNegativeBalance,
+    templateId: r.templateId ? r.templateId.toString() : null,
+    periodLabel:
+      r.periodStart && r.periodEnd ? formatPeriodLabel(r.periodStart, r.periodEnd) : null,
+    version: r.version,
   }));
 
   return { rows: items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
@@ -197,6 +213,259 @@ export async function createExpense(input: CreateExpenseInput, actor: AuthedUser
   });
 }
 
+export async function getPendingExpenseCount() {
+  return countPendingExpenses();
+}
+
+/**
+ * Section 6.3.3 — approveExpense. THIS is where a recurring expense becomes
+ * money: until now the row was pending, no Transaction existed and no
+ * balance had moved.
+ *
+ * Every guard createExpense runs up front runs here instead, not in
+ * addition: at generation time there was nothing to guard, and the account's
+ * balance a month ago is irrelevant to whether it can fund the payment
+ * today. Role: admin+ (enforced by the action wrapper) — deliberately
+ * stricter than recording a one-off expense, because approving is the step
+ * that releases money someone else scheduled.
+ */
+export async function approveExpense(input: ApproveExpenseInput, actor: AuthedUser) {
+  return runWithIdempotency({
+    fetchExisting: async () => {
+      const expense = await findExpenseById(input.expenseId);
+      if (!expense || expense.status !== "active") return null;
+      const account = await findAccountById(expense.accountId.toString());
+      return { expense, accountNewBalance: account?.currentBalancePaise ?? 0 };
+    },
+    run: () =>
+      withDbTransaction(async (session) => {
+        const pending = await findExpenseById(input.expenseId);
+        if (!pending) throw new AppError("NOT_FOUND", "Expense not found");
+        if (pending.status !== "pending") {
+          throw new AppError(
+            "CONFLICT",
+            pending.status === "active"
+              ? "This expense has already been approved."
+              : `This expense is ${pending.status} and can no longer be approved.`
+          );
+        }
+
+        const account = await findAccountById(pending.accountId.toString());
+        if (!account || account.status !== "active") {
+          throw new AppError("VALIDATION", "The account on this expense is not active");
+        }
+        if (account.reconcileLock) {
+          throw new AppError(
+            "LOCKED",
+            "This account is locked pending reconciliation. Resolve it in Settings before approving."
+          );
+        }
+        if (isAfterTodayIST(input.spentAt)) {
+          throw new AppError("VALIDATION", "Expense date cannot be in the future.");
+        }
+
+        const wouldBePaise = account.currentBalancePaise - pending.amountPaise;
+        const effectiveOverride = input.overrideNegativeBalance === true && actor.role === "owner";
+        if (wouldBePaise < 0 && !effectiveOverride) {
+          throw new AppError(
+            "INSUFFICIENT_BALANCE",
+            `${account.name} has ${formatINR(account.currentBalancePaise)}. This expense needs ${formatINR(-wouldBePaise)} more.`,
+            { data: { balancePaise: account.currentBalancePaise, shortfallPaise: -wouldBePaise } }
+          );
+        }
+
+        const transactionId = new Types.ObjectId();
+        // monthKey comes from the APPROVED date, not the period: this is a
+        // cash ledger, and the money leaves on the day it is approved.
+        // August's salary paid on 3 Sep is a September cash movement; the
+        // August period it covers is preserved on the expense itself.
+        await insertTransaction(
+          {
+            _id: transactionId,
+            type: "EXPENSE_OUT",
+            direction: "OUT",
+            amountPaise: pending.amountPaise,
+            accountId: pending.accountId.toString(),
+            occurredAt: input.spentAt,
+            monthKey: toMonthKey(input.spentAt),
+            expenseId: pending._id.toString(),
+            counterpartyLabel: pending.paidToEntity,
+            idempotencyKey: input.idempotencyKey,
+            createdBy: actor.id,
+          },
+          session
+        );
+
+        const approved = await markExpenseApproved(
+          pending._id.toString(),
+          {
+            transactionId,
+            approvedBy: actor.id,
+            approvedAt: new Date(),
+            spentAt: input.spentAt,
+          },
+          session
+        );
+        // Null means a concurrent approval won the race and moved it out of
+        // `pending` — roll this one back rather than double-posting.
+        if (!approved) {
+          throw new AppError("CONFLICT", "This expense was approved by someone else just now.");
+        }
+
+        const updatedAccount = await incrementAccountBalance(
+          pending.accountId.toString(),
+          -pending.amountPaise,
+          session
+        );
+        if (!updatedAccount) throw new AppError("VALIDATION", "The account on this expense is not active");
+
+        const settings = await getSettingsOrDefaults();
+        if (pending.amountPaise >= settings.largeExpenseAlertPaise) {
+          await notify(
+            {
+              type: "LARGE_EXPENSE",
+              severity: "warning",
+              title: "Large expense approved",
+              body: `${formatINR(pending.amountPaise)} paid to ${pending.paidToEntity} from ${account.name}`,
+              entityRef: { kind: "expense", id: pending._id.toString() },
+              href: `/ledger/expenses`,
+              audience: "all",
+              dedupeKey: `EXP:${pending._id.toString()}`,
+            },
+            session
+          );
+        }
+
+        const threshold = account.lowBalanceThresholdPaise ?? settings.lowBalanceDefaultPaise;
+        if (updatedAccount.currentBalancePaise < threshold) {
+          await notify(
+            {
+              type: "LOW_BALANCE",
+              severity: "warning",
+              title: "Low balance",
+              body: `${account.name} is now at ${formatINR(updatedAccount.currentBalancePaise)}`,
+              entityRef: { kind: "account", id: pending.accountId.toString() },
+              href: `/ledger/accounts/${pending.accountId.toString()}`,
+              audience: "all",
+              dedupeKey: `LOWBAL:${pending.accountId.toString()}:${todayIST()}`,
+            },
+            session
+          );
+        }
+
+        await logAudit(
+          {
+            actorUserId: actor.id,
+            actorName: actor.name,
+            action: "EXPENSE_APPROVED",
+            entity: { kind: "expense", id: pending._id },
+            before: { status: "pending" },
+            after: {
+              status: "active",
+              amountPaise: pending.amountPaise,
+              overrideNegativeBalance: effectiveOverride,
+            },
+            summary: `${actor.name} approved ${formatINR(pending.amountPaise)} to ${pending.paidToEntity} from ${account.name}${effectiveOverride ? " (balance override)" : ""}`,
+          },
+          session
+        );
+
+        return { expense: approved, accountNewBalance: updatedAccount.currentBalancePaise };
+      }),
+  });
+}
+
+/**
+ * Section 6.3.3 — editing, permitted ONLY while pending. No Transaction
+ * exists and no balance has moved, so there is nothing posted to contradict
+ * and nothing to unwind; the row is simply corrected before it becomes
+ * money. An approved expense is immutable and corrects via reversal.
+ *
+ * The `status: "pending"` check lives in the UPDATE's filter as well as the
+ * read below, so an expense approved between this form loading and
+ * submitting fails cleanly instead of rewriting a posted row.
+ */
+export async function updatePendingExpense(input: UpdatePendingExpenseInput, actor: AuthedUser) {
+  const before = await findExpenseById(input.expenseId);
+  if (!before) throw new AppError("NOT_FOUND", "Expense not found");
+  if (before.status !== "pending") {
+    throw new AppError(
+      "CONFLICT",
+      "Only a pending expense can be edited. Approved expenses must be reversed instead."
+    );
+  }
+
+  const account = await findAccountById(input.accountId);
+  if (!account || account.status !== "active") {
+    throw new AppError("VALIDATION", "Selected account is not active");
+  }
+
+  const updated = await updatePendingExpenseOptimistic(input.expenseId, input.version, {
+    amountPaise: input.amountPaise,
+    reason: input.reason,
+    paidToEntity: input.paidToEntity,
+    category: input.category,
+    accountId: new Types.ObjectId(input.accountId),
+    spentAt: input.spentAt,
+    note: input.note ?? null,
+    attachments: stampAttachments(input.attachments, actor.id),
+  });
+  if (!updated) {
+    throw new AppError(
+      "CONFLICT",
+      "This expense changed while you were editing it. Reopen and try again."
+    );
+  }
+
+  await logAudit({
+    actorUserId: actor.id,
+    actorName: actor.name,
+    action: "EXPENSE_UPDATED",
+    entity: { kind: "expense", id: updated._id },
+    before: {
+      amountPaise: before.amountPaise,
+      paidToEntity: before.paidToEntity,
+      category: before.category,
+    },
+    after: {
+      amountPaise: updated.amountPaise,
+      paidToEntity: updated.paidToEntity,
+      category: updated.category,
+    },
+    summary: `${actor.name} edited the pending expense to ${updated.paidToEntity} (${formatINR(before.amountPaise)} → ${formatINR(updated.amountPaise)})`,
+  });
+
+  return { expense: updated };
+}
+
+/** Dismiss a pending expense. No money moved, so there is nothing to
+ * reverse — the row is kept in `cancelled` rather than deleted so a missing
+ * month stays explainable a year later. */
+export async function cancelPendingExpense(input: CancelPendingExpenseInput, actor: AuthedUser) {
+  const before = await findExpenseById(input.expenseId);
+  if (!before) throw new AppError("NOT_FOUND", "Expense not found");
+  if (before.status !== "pending") {
+    throw new AppError("CONFLICT", "Only a pending expense can be cancelled.");
+  }
+
+  const cancelled = await markPendingExpenseCancelled(input.expenseId, actor.id, input.reason);
+  if (!cancelled) {
+    throw new AppError("CONFLICT", "This expense changed while you were cancelling it.");
+  }
+
+  await logAudit({
+    actorUserId: actor.id,
+    actorName: actor.name,
+    action: "EXPENSE_CANCELLED",
+    entity: { kind: "expense", id: cancelled._id },
+    before: { status: "pending" },
+    after: { status: "cancelled", reason: input.reason },
+    summary: `${actor.name} cancelled the pending ${formatINR(before.amountPaise)} expense to ${before.paidToEntity} (${input.reason})`,
+  });
+
+  return { expense: cancelled };
+}
+
 // Section 6.3's reversal — mirrors reversePayment (Section 6.2). Role:
 // admin+ (enforced by the action wrapper, not here).
 export async function reverseExpense(input: ReverseExpenseInput, actor: AuthedUser) {
@@ -212,8 +481,20 @@ export async function reverseExpense(input: ReverseExpenseInput, actor: AuthedUs
         const expense = await findExpenseById(input.expenseId);
         if (!expense) throw new AppError("NOT_FOUND", "Expense not found");
         if (expense.status !== "active") {
-          throw new AppError("CONFLICT", "Already reversed. Record a fresh entry instead.");
+          throw new AppError(
+            "CONFLICT",
+            expense.status === "pending"
+              ? "This expense has not been approved yet — cancel it instead of reversing."
+              : "Already reversed. Record a fresh entry instead."
+          );
         }
+        // Only pending expenses carry a null transactionId, and the check
+        // above has already excluded those. Reaching this is a data-integrity
+        // bug (an active expense with no ledger entry), not a user error.
+        if (!expense.transactionId) {
+          throw new AppError("INTERNAL", "This expense has no ledger transaction to reverse.");
+        }
+        const originalTransactionId = expense.transactionId.toString();
 
         // Section 14 edge case 3's monthKey rule applies here too: the
         // reversal must land in the SAME monthKey as the original expense
@@ -230,7 +511,7 @@ export async function reverseExpense(input: ReverseExpenseInput, actor: AuthedUs
             occurredAt: new Date(),
             monthKey: toMonthKey(expense.spentAt),
             expenseId: expense._id.toString(),
-            reversesTransactionId: expense.transactionId.toString(),
+            reversesTransactionId: originalTransactionId,
             counterpartyLabel: null,
             idempotencyKey: input.idempotencyKey,
             createdBy: actor.id,
@@ -239,7 +520,7 @@ export async function reverseExpense(input: ReverseExpenseInput, actor: AuthedUs
         );
         void reversalTx;
 
-        await markTransactionReversed(expense.transactionId.toString(), session);
+        await markTransactionReversed(originalTransactionId, session);
         await markExpenseReversed(expense._id.toString(), actor.id, input.reason, session);
 
         const updatedAccount = await incrementAccountBalance(

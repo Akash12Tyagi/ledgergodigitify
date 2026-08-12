@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { env } from "@/config/env";
 import { runRollover } from "@/server/services/rollover.service";
+import { runExpenseRollover } from "@/server/services/expense-templates.service";
 import { runDueReminders, runMonthSummary } from "@/server/services/notifications.service";
 import { runReconciliation } from "@/server/services/reconciliation.service";
 import { logAudit } from "@/server/services/audit.service";
@@ -25,11 +26,13 @@ export async function GET(request: Request) {
   const startedAt = new Date().toISOString();
 
   const rollover = await runRollover(SYSTEM_ACTOR_ID, SYSTEM_ACTOR_NAME);
+  // Raises PENDING expenses only — never posts money. See runExpenseRollover.
+  const expenseRollover = await runExpenseRollover(SYSTEM_ACTOR_ID, SYSTEM_ACTOR_NAME);
   const dueReminders = await runDueReminders();
   const monthSummary = await runMonthSummary();
   const reconciliation = await runReconciliation();
 
-  const summary = { rollover, dueReminders, monthSummary, reconciliation };
+  const summary = { rollover, expenseRollover, dueReminders, monthSummary, reconciliation };
 
   await logAudit({
     actorUserId: SYSTEM_ACTOR_ID,
@@ -37,7 +40,7 @@ export async function GET(request: Request) {
     action: "CRON_RUN",
     entity: { kind: "system", id: null },
     after: summary,
-    summary: `Daily cron: ${rollover.created} due(s) generated across ${rollover.scanned} retainer(s), ${dueReminders.upcomingCreated + dueReminders.overdueCreated} due reminder(s), month summary ${monthSummary.created ? "sent" : "skipped"}, ${reconciliation.lockedAccountIds.length} account(s) locked for reconciliation.`,
+    summary: `Daily cron: ${rollover.created} due(s) generated across ${rollover.scanned} retainer(s), ${expenseRollover.created} pending expense(s) raised across ${expenseRollover.scanned} template(s), ${dueReminders.upcomingCreated + dueReminders.overdueCreated} due reminder(s), month summary ${monthSummary.created ? "sent" : "skipped"}, ${reconciliation.lockedAccountIds.length} account(s) locked for reconciliation.`,
   });
 
   return NextResponse.json({ ok: true, startedAt, finishedAt: new Date().toISOString(), ...summary });

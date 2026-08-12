@@ -23,6 +23,8 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   destructive = false,
   onConfirm,
+  extraField,
+  confirmDisabled = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -31,15 +33,23 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
-  onConfirm: () => void | Promise<void>;
+  /**
+   * Return `false` to KEEP the dialog open — used when the action failed
+   * and the reason is being shown inside `extraField`. Returning void (the
+   * common case) closes it, so existing callers are unaffected.
+   */
+  onConfirm: () => void | boolean | Promise<void | boolean>;
+  /** e.g. a date picker or reason box rendered above the buttons. */
+  extraField?: React.ReactNode;
+  confirmDisabled?: boolean;
 }) {
   const [pending, setPending] = React.useState(false);
 
   async function handleConfirm() {
     setPending(true);
     try {
-      await onConfirm();
-      onOpenChange(false);
+      const result = await onConfirm();
+      if (result !== false) onOpenChange(false);
     } finally {
       setPending(false);
     }
@@ -52,6 +62,7 @@ export function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+        {extraField ? <div className="grid gap-3">{extraField}</div> : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             {cancelLabel}
@@ -59,7 +70,7 @@ export function ConfirmDialog({
           <Button
             variant={destructive ? "destructive" : "default"}
             onClick={handleConfirm}
-            disabled={pending}
+            disabled={pending || confirmDisabled}
           >
             {pending ? "Working…" : confirmLabel}
           </Button>

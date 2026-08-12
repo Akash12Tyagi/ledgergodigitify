@@ -18,16 +18,20 @@ export function ExpensesTableView({
   page,
   pageSize,
   role,
+  pendingCount = 0,
 }: {
   rows: ExpenseRow[];
   total: number;
   page: number;
   pageSize: number;
   role: UserRole;
+  /** Total awaiting approval, across every period — not just this page. */
+  pendingCount?: number;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const status = searchParams.get("status") ?? "active";
 
   function setParam(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -39,6 +43,22 @@ export function ExpensesTableView({
 
   return (
     <div className="grid gap-4">
+      {/* Recurring expenses are raised by the cron with nobody watching, so
+          the queue has to announce itself — otherwise a salary sits unpaid
+          purely because no one thought to change the status filter. */}
+      {pendingCount > 0 && status !== "pending" ? (
+        <button
+          type="button"
+          onClick={() => setParam("status", "pending")}
+          className="flex w-full items-center gap-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-left text-sm hover:bg-warn/10"
+        >
+          <span className="font-medium text-warn">
+            {pendingCount} expense{pendingCount === 1 ? "" : "s"} awaiting approval
+          </span>
+          <span className="text-muted-foreground">— review and approve</span>
+        </button>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <CreateExpenseSheet role={role} />
         <div className="flex flex-wrap items-center gap-2">
@@ -57,13 +77,26 @@ export function ExpensesTableView({
               ))}
             </SelectContent>
           </Select>
-          <Select value={searchParams.get("status") ?? "active"} onValueChange={(v) => setParam("status", v ?? "active")}>
-            <SelectTrigger className="w-36">
-              <SelectValue labels={{ active: "Active", reversed: "Reversed", all: "All" }} />
+          <Select
+            value={searchParams.get("status") ?? "active"}
+            onValueChange={(v) => setParam("status", v ?? "active")}
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue
+                labels={{
+                  pending: "Awaiting approval",
+                  active: "Posted",
+                  reversed: "Reversed",
+                  cancelled: "Cancelled",
+                  all: "All",
+                }}
+              />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="pending">Awaiting approval</SelectItem>
+              <SelectItem value="active">Posted</SelectItem>
               <SelectItem value="reversed">Reversed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
               <SelectItem value="all">All</SelectItem>
             </SelectContent>
           </Select>

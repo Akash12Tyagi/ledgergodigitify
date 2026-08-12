@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 
 import { PageHeader } from "@/components/shared/PageHeader";
-import { PeriodRangePicker } from "@/components/shared/PeriodRangePicker";
+import { DateRangeFilter } from "@/components/shared/DateRangeFilter";
 import { CreditsTableView } from "@/features/credits/components/CreditsTableView";
 import { listCredits } from "@/server/services/credits.service";
-import { getSettings } from "@/server/services/settings.service";
 import { requireUser } from "@/server/auth/guards";
 import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
-import { monthRangeToUtc, nowIST, toMonthKey } from "@/lib/dates";
+import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
+import { resolveDateRange } from "@/lib/date-range";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import type { CreditCategory } from "@/constants/domain";
 
@@ -37,22 +37,33 @@ export default async function CreditsPage({
     cookieStore.get(PERIOD_TO_COOKIE)?.value,
     toMonthKey(nowIST())
   );
-  const { startUTC, endUTC } = monthRangeToUtc(from, to);
+  // Exact ?from/?to dates win; with neither, this falls back to the same
+  // months the Overview's Credits figure covers.
+  const dateRange = resolveDateRange(params.from, params.to, { from, to });
 
-  const [result, settings] = await Promise.all([
-    listCredits({ category, status, page, pageSize, receivedFrom: startUTC, receivedTo: endUTC }),
-    getSettings(),
-  ]);
+  const result = await listCredits({
+    category,
+    status,
+    page,
+    pageSize,
+    receivedFrom: dateRange.startUTC,
+    receivedTo: dateRange.endUTC,
+  });
 
   return (
     <div>
       <PageHeader
         title="Credits"
+        description="Money in that did not come from a client invoice — owner capital, loans, refunds, interest."
         action={
-          <PeriodRangePicker
-            fromMonthKey={from}
-            toMonthKey={to}
-            minMonthKey={settings.goLiveDate ? toMonthKey(settings.goLiveDate) : undefined}
+          <DateRangeFilter
+            from={dateRange.from}
+            to={dateRange.to}
+            fallbackLabel={
+              from === to
+                ? formatMonthLabel(to)
+                : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`
+            }
           />
         }
       />

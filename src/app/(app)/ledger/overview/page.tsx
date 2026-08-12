@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DrilldownCard } from "@/components/shared/DrilldownCard";
-import { KpiCard } from "@/components/shared/KpiCard";
+import { CashFlowSummary } from "@/components/shared/CashFlowSummary";
 import { AmountText } from "@/components/shared/AmountText";
 import { PeriodRangePicker } from "@/components/shared/PeriodRangePicker";
 import { ReconciliationBanner } from "@/components/shared/ReconciliationBanner";
@@ -93,6 +93,7 @@ export default async function LedgerOverviewPage({
     <div>
       <PageHeader
         title="Ledger Overview"
+        description="Where your money went this period, and what is still owed to you."
         action={
           <PeriodRangePicker
             fromMonthKey={fromMonthKey}
@@ -110,92 +111,87 @@ export default async function LedgerOverviewPage({
             <DevSumAssertion label={assertionLabel} expectedPaise={expectedPaise} actualPaise={actualPaise} />
           ) : null}
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <DrilldownCard
-              label="Opening Position"
-              value={formatINR(overview.openingPositionPaise)}
-              href="#per-account"
-              ariaLabel={`View the per-account breakdown behind the opening position of ${formatINR(overview.openingPositionPaise)}`}
+          <section className="grid gap-2">
+            <h2 className="text-sm font-medium">Cash — {rangeLabel}</h2>
+            <CashFlowSummary
+              openingPaise={overview.openingPositionPaise}
+              collectedPaise={overview.collectedPaise}
+              creditsPaise={overview.creditsPaise}
+              expensesPaise={overview.expensesPaise}
+              lentPaise={overview.lentPaise}
+              loanRepaidPaise={overview.loanRepaidPaise}
+              adjustmentsNetPaise={overview.adjustmentsNetPaise}
+              closingPaise={overview.closingPositionPaise}
             />
-            <DrilldownCard
-              label={`Billed — ${rangeLabel}`}
-              value={formatINR(overview.billedPaise)}
-              href="/ledger/billed"
-              ariaLabel={`View clients billed this month, totalling ${formatINR(overview.billedPaise)}`}
-            />
-            <DrilldownCard
-              label="Collected"
-              value={formatINR(overview.collectedPaise)}
-              href="/ledger/overview?type=PAYMENT_IN"
-              ariaLabel={`View payments collected, totalling ${formatINR(overview.collectedPaise)}`}
-            />
-            <DrilldownCard
-              label="Credits"
-              value={formatINR(overview.creditsPaise)}
-              href="/ledger/overview?type=CREDIT_IN"
-              ariaLabel={`View credits received, totalling ${formatINR(overview.creditsPaise)}`}
-            />
-            <DrilldownCard
-              label="Expenses"
-              value={formatINR(overview.expensesPaise)}
-              href="/ledger/overview?type=EXPENSE_OUT"
-              ariaLabel={`View expenses, totalling ${formatINR(overview.expensesPaise)}`}
-              tone={overview.expensesPaise > 0 ? "warn" : "neutral"}
-            />
-            {/* Only shown when there are any. Manual balance corrections are
-                rare, but they move real money, so when they exist they must
-                be visible in the math block — otherwise Net Cash Flow would
-                appear not to add up from the cards above it. */}
-            {overview.adjustmentsNetPaise !== 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Net change this period:{" "}
+              <AmountText paise={overview.netCashFlowPaise} tone="auto" showSign />
+            </p>
+          </section>
+
+          {/* Kept strictly apart from the cash block above. These are
+              promises, not money in an account: counting them together is
+              the single easiest way to believe you are richer than you are. */}
+          <section className="grid gap-2">
+            <h2 className="text-sm font-medium">Owed to you</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <DrilldownCard
-                label="Adjustments"
-                value={formatINR(overview.adjustmentsNetPaise)}
-                href="/ledger/overview?type=ADJUSTMENT"
-                ariaLabel={`View manual balance adjustments, netting ${formatINR(overview.adjustmentsNetPaise)}`}
-                tone="warn"
+                label={`Billed — ${rangeLabel}`}
+                value={formatINR(overview.billedPaise)}
+                href="/ledger/billed"
+                ariaLabel={`View clients billed this period, totalling ${formatINR(overview.billedPaise)}`}
               />
-            ) : null}
-            <KpiCard
-              label="Net Cash Flow"
-              value={<AmountText paise={overview.netCashFlowPaise} tone="auto" />}
-            />
-            <DrilldownCard
-              label="Closing Position"
-              value={formatINR(overview.closingPositionPaise)}
-              href="#per-account"
-              ariaLabel={`View the per-account breakdown behind the closing position of ${formatINR(overview.closingPositionPaise)}`}
-            />
-          </div>
+              <DrilldownCard
+                label="Outstanding (all time)"
+                value={formatINR(overview.outstandingDuesPaise)}
+                href="/ledger/dues"
+                ariaLabel={`View all unpaid dues, totalling ${formatINR(overview.outstandingDuesPaise)}`}
+                tone={overview.outstandingDuesPaise > 0 ? "warn" : "neutral"}
+              />
+              <DrilldownCard
+                label="Overdue"
+                value={formatINR(overview.overduePaise)}
+                href="/ledger/dues"
+                ariaLabel={`View overdue dues, totalling ${formatINR(overview.overduePaise)}`}
+                tone={overview.overduePaise > 0 ? "danger" : "neutral"}
+              />
+            </div>
+          </section>
 
           <Card id="per-account">
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Per-Account</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                Where the money sits
+                <span className="ml-2 font-normal text-muted-foreground">
+                  — the same totals, split by account
+                </span>
+              </CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs text-muted-foreground">
-                    <th className="py-1.5 pr-3 font-medium">Account</th>
-                    <th className="py-1.5 pr-3 font-medium">Opening</th>
-                    <th className="py-1.5 pr-3 font-medium">In</th>
-                    <th className="py-1.5 pr-3 font-medium">Out</th>
-                    <th className="py-1.5 font-medium">Closing</th>
+                  <tr className="text-xs text-muted-foreground">
+                    <th className="py-1.5 pr-3 text-left font-medium">Account</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">Opening</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">In</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">Out</th>
+                    <th className="py-1.5 text-right font-medium">Closing</th>
                   </tr>
                 </thead>
                 <tbody>
                   {overview.perAccount.map((row) => (
                     <tr key={row.accountId} className="border-t">
                       <td className="py-1.5 pr-3">{row.name}</td>
-                      <td className="py-1.5 pr-3">
+                      <td className="py-1.5 pr-3 text-right">
                         <AmountText paise={row.openingPaise} />
                       </td>
-                      <td className="py-1.5 pr-3">
+                      <td className="py-1.5 pr-3 text-right">
                         <AmountText paise={row.inPaise} tone="in" />
                       </td>
-                      <td className="py-1.5 pr-3">
+                      <td className="py-1.5 pr-3 text-right">
                         <AmountText paise={row.outPaise} tone="out" />
                       </td>
-                      <td className="py-1.5">
+                      <td className="py-1.5 text-right">
                         <AmountText paise={row.closingPaise} />
                       </td>
                     </tr>

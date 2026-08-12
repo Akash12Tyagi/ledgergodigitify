@@ -427,6 +427,8 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     collectedPaise,
     creditsPaise,
     expensesPaise,
+    lentPaise,
+    loanRepaidPaise,
     adjustmentsNetPaise,
     categoryRows,
     outstanding,
@@ -443,6 +445,8 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     sumByTypeAndMonth(monthKey, ["PAYMENT_IN"]),
     sumByTypeAndMonth(monthKey, ["CREDIT_IN"]),
     sumByTypeAndMonth(monthKey, ["EXPENSE_OUT"]),
+    sumByTypeAndMonth(monthKey, ["LOAN_OUT"]),
+    sumByTypeAndMonth(monthKey, ["LOAN_REPAY_IN"]),
     sumAdjustmentsNetForMonth(monthKey),
     sumExpensesByCategoryInRange(startUTC, endUTC),
     computeOutstandingAndOverdue(),
@@ -464,7 +468,17 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     closingPositionPaise += closingPaise;
   }
 
-  const netCashFlowPaise = collectedPaise + creditsPaise - expensesPaise + adjustmentsNetPaise;
+  // Every balance-affecting type that does NOT net to zero across accounts
+  // has to appear here, or closing !== opening + net and the whole period
+  // blanks out behind the reconciliation banner. Transfers and reversals are
+  // absent because they self-cancel; loans are present because they don't.
+  const netCashFlowPaise =
+    collectedPaise +
+    creditsPaise +
+    loanRepaidPaise -
+    expensesPaise -
+    lentPaise +
+    adjustmentsNetPaise;
   const expectedClosing = openingPositionPaise + netCashFlowPaise;
   const reconciliationError = closingPositionPaise !== expectedClosing;
 
@@ -482,6 +496,8 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
       collectedPaise: 0,
       creditsPaise: 0,
       expensesPaise: 0,
+      lentPaise: 0,
+      loanRepaidPaise: 0,
       adjustmentsNetPaise: 0,
       netCashFlowPaise: 0,
       closingPositionPaise: 0,
@@ -500,6 +516,8 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     collectedPaise,
     creditsPaise,
     expensesPaise,
+    lentPaise,
+    loanRepaidPaise,
     adjustmentsNetPaise,
     netCashFlowPaise,
     closingPositionPaise,
@@ -576,6 +594,8 @@ export async function getRangeOverview(
       collectedPaise: 0,
       creditsPaise: 0,
       expensesPaise: 0,
+      lentPaise: 0,
+      loanRepaidPaise: 0,
       adjustmentsNetPaise: 0,
       netCashFlowPaise: 0,
       closingPositionPaise: 0,
@@ -626,6 +646,8 @@ export async function getRangeOverview(
     collectedPaise: overviews.reduce((s, o) => s + o.collectedPaise, 0),
     creditsPaise: overviews.reduce((s, o) => s + o.creditsPaise, 0),
     expensesPaise: overviews.reduce((s, o) => s + o.expensesPaise, 0),
+    lentPaise: overviews.reduce((s, o) => s + o.lentPaise, 0),
+    loanRepaidPaise: overviews.reduce((s, o) => s + o.loanRepaidPaise, 0),
     adjustmentsNetPaise: overviews.reduce((s, o) => s + o.adjustmentsNetPaise, 0),
     netCashFlowPaise: overviews.reduce((s, o) => s + o.netCashFlowPaise, 0),
     closingPositionPaise: last.closingPositionPaise,

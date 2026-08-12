@@ -15,7 +15,10 @@ export default async function AccountsPage() {
 
   return (
     <div>
-      <PageHeader title="Accounts" />
+      <PageHeader
+        title="Accounts"
+        description="Where your money physically sits. Use “Move money” to record cash deposited into the bank, or anything else that shifts between accounts."
+      />
       <AccountsPageView
         accounts={accounts.map((a) => ({
           id: a._id.toString(),
