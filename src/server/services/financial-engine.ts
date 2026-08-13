@@ -5,7 +5,11 @@ import {
   nowIST,
   shiftMonthKey,
   todayIST,
+  // Aliased: `toMonthKey` is also the name of the range parameter these
+  // overview functions take, and the shadowing is silent at the call site.
+  toMonthKey as monthKeyOfDate,
 } from "@/lib/dates";
+import { ALL_TIME_FROM } from "@/lib/period-range-context";
 import {
   findAccountById,
   findAccountsByIds,
@@ -18,7 +22,7 @@ import {
   findBillingsByMonth,
   findBillingsInMonthRange,
   findBillingsByStatus,
-  sumBilledForMonth,
+  sumBilledInMonthRange,
   OPEN_BILLING_STATUSES,
 } from "@/server/repositories/monthly-billings.repository";
 import { formatPeriodLabel } from "@/lib/billing-period";
@@ -29,15 +33,14 @@ import {
   findRecentTransactions,
   findRecentTransactionsInRange,
   findTransactionsPaginated,
-  sumAdjustmentsNetForMonth,
-  sumByTypeAndMonth,
   sumByTypeGroupedByMonth,
+  sumFlowsByTypeInMonthRange,
   sumInOutByAccountBeforeMonth,
-  sumInOutByAccountForMonth,
+  sumInOutByAccountInMonthRange,
   sumInOutForAccountAsOf,
   sumTransactionsMatchingFilter,
 } from "@/server/repositories/transactions.repository";
-import type { PayStatus } from "@/constants/domain";
+import type { PayStatus, TransactionType } from "@/constants/domain";
 import type {
   AccountReconcileResult,
   AccountStripItem,
@@ -47,7 +50,6 @@ import type {
   DashboardData,
   DueRow,
   DuesList,
-  ExpenseByCategoryRow,
   MonthKey,
   MonthOverview,
   Paginated,
@@ -415,103 +417,175 @@ export async function getDuesList(asOfISTDate: string): Promise<DuesList> {
 // Month overview (Section 7.5's "money mathematics" ledger equation)
 // ─────────────────────────────────────────────────────────────────────────
 
+/** A single reporting month — the From–To range collapsed to one key. Kept
+ * as a thin wrapper rather than its own implementation so a month total and
+ * a range total can never drift apart: there is exactly one code path. */
 export async function getMonthOverview(monthKey: string): Promise<MonthOverview> {
-  const { startUTC, endUTC } = monthKeyToRange(monthKey);
+  return getRangeOverview(monthKey, monthKey);
+}
+
+function emptyOverview(monthKey: string, reconciliationError: boolean): MonthOverview {
+  return {
+    monthKey: monthKey as MonthKey,
+    openingPositionPaise: 0,
+    openingBalancesAddedPaise: 0,
+    billedPaise: 0,
+    collectedPaise: 0,
+    creditsPaise: 0,
+    expensesPaise: 0,
+    lentPaise: 0,
+    loanRepaidPaise: 0,
+    adjustmentsNetPaise: 0,
+    netCashFlowPaise: 0,
+    closingPositionPaise: 0,
+    outstandingDuesPaise: 0,
+    overduePaise: 0,
+    perAccount: [],
+    expenseByCategory: [],
+    ...(reconciliationError ? { reconciliationError: true } : {}),
+  };
+}
+
+/**
+ * Section 7.5/4.3 — the money-math block, over an inclusive span of
+ * reporting months. `fromMonthKey` may be ALL_TIME_FROM ("0000-01") for an
+ * all-time period; month keys compare as plain strings, so nothing below
+ * needs to know the difference.
+ *
+ * Section 4.2 — flow figures (billed/collected/credits/expenses/net) sum
+ * across the range; position figures (opening/closing) are taken at the
+ * range's edges; overdue/outstanding are today-relative snapshots,
+ * identical regardless of range.
+ *
+ * This used to fan a range out into one getMonthOverview call per month and
+ * add the results up. That was ~11 queries per month in the range — fine
+ * for the three-month default, hopeless for all time. Every aggregate here
+ * is now range-native, so the cost is flat: a two-year period and a
+ * one-month period issue the same six queries.
+ */
+export async function getRangeOverview(
+  fromMonthKey: string,
+  toMonthKey: string
+): Promise<MonthOverview> {
+  const isAllTime = fromMonthKey === ALL_TIME_FROM;
   const accounts = await findAllAccounts();
   const accountIds = accounts.map((a) => a._id.toString());
 
-  const [
-    inOutThisMonth,
-    inOutBeforeMonth,
-    billedPaise,
-    collectedPaise,
-    creditsPaise,
-    expensesPaise,
-    lentPaise,
-    loanRepaidPaise,
-    adjustmentsNetPaise,
-    categoryRows,
-    outstanding,
-  ] = await Promise.all([
-    // Section 14 edge case 3 — perAccount in/out MUST use the same
-    // monthKey dimension as collected/credits/expenses below, not an
-    // occurredAt date range. A payment settling last month's billing has
-    // monthKey = that billing's month even when recorded later; filtering
-    // positions by date range while filtering flows by monthKey would
-    // make the closing==opening+net assert fail on entirely correct data.
-    sumInOutByAccountForMonth(accountIds, monthKey),
-    sumInOutByAccountBeforeMonth(accountIds, monthKey),
-    sumBilledForMonth(monthKey),
-    sumByTypeAndMonth(monthKey, ["PAYMENT_IN"]),
-    sumByTypeAndMonth(monthKey, ["CREDIT_IN"]),
-    sumByTypeAndMonth(monthKey, ["EXPENSE_OUT"]),
-    sumByTypeAndMonth(monthKey, ["LOAN_OUT"]),
-    sumByTypeAndMonth(monthKey, ["LOAN_REPAY_IN"]),
-    sumAdjustmentsNetForMonth(monthKey),
-    sumExpensesByCategoryInRange(startUTC, endUTC),
-    computeOutstandingAndOverdue(),
-  ]);
+  // The category donut reads `expenses.spentAt` (a real date) because
+  // category lives on the Expense, not the ledger row. An all-time period
+  // has no earliest month to convert, so it goes unbounded rather than
+  // inventing a floor that would drop backdated rows.
+  const startUTC = isAllTime ? null : monthKeyToRange(fromMonthKey).startUTC;
+  const endUTC = monthKeyToRange(toMonthKey).endUTC;
+
+  const [inOutInRange, inOutBeforeRange, billedPaise, flows, categoryRows, outstanding] =
+    await Promise.all([
+      // Section 14 edge case 3 — perAccount in/out MUST use the same
+      // monthKey dimension as collected/credits/expenses below, not an
+      // occurredAt date range. A payment settling last month's billing has
+      // monthKey = that billing's month even when recorded later; filtering
+      // positions by date range while filtering flows by monthKey would
+      // make the closing==opening+net assert fail on entirely correct data.
+      sumInOutByAccountInMonthRange(accountIds, fromMonthKey, toMonthKey),
+      sumInOutByAccountBeforeMonth(accountIds, fromMonthKey),
+      sumBilledInMonthRange(fromMonthKey, toMonthKey),
+      sumFlowsByTypeInMonthRange(fromMonthKey, toMonthKey),
+      sumExpensesByCategoryInRange(startUTC, endUTC),
+      computeOutstandingAndOverdue(),
+    ]);
+
+  const flowOf = (type: TransactionType) =>
+    flows.get(type) ?? { inPaise: 0, outPaise: 0, totalPaise: 0 };
+
+  const collectedPaise = flowOf("PAYMENT_IN").totalPaise;
+  const creditsPaise = flowOf("CREDIT_IN").totalPaise;
+  const expensesPaise = flowOf("EXPENSE_OUT").totalPaise;
+  const lentPaise = flowOf("LOAN_OUT").totalPaise;
+  const loanRepaidPaise = flowOf("LOAN_REPAY_IN").totalPaise;
+  // ADJUSTMENT is the one type carrying both signs, so it nets rather than
+  // totals — see sumFlowsByTypeInMonthRange.
+  const adjustmentsNetPaise = flowOf("ADJUSTMENT").inPaise - flowOf("ADJUSTMENT").outPaise;
 
   const perAccount: PerAccountRow[] = [];
   let openingPositionPaise = 0;
   let closingPositionPaise = 0;
+  let openingBalancesAddedPaise = 0;
 
   for (const account of accounts) {
     const id = account._id.toString();
-    const before = inOutBeforeMonth.get(id) ?? { inPaise: 0, outPaise: 0 };
-    const openingPaise = account.openingBalancePaise + before.inPaise - before.outPaise;
-    const { inPaise, outPaise } = inOutThisMonth.get(id) ?? { inPaise: 0, outPaise: 0 };
-    const closingPaise = openingPaise + inPaise - outPaise;
+    const before = inOutBeforeRange.get(id) ?? { inPaise: 0, outPaise: 0 };
+    const { inPaise: rangeIn, outPaise: rangeOut } =
+      inOutInRange.get(id) ?? { inPaise: 0, outPaise: 0 };
 
-    perAccount.push({ accountId: id, name: account.name, openingPaise, inPaise, outPaise, closingPaise });
+    /**
+     * An account's seed `openingBalancePaise` is not backed by a ledger
+     * row — it is money declared into existence when the account was
+     * created. It therefore has to enter the equation at the month the
+     * account was created, NOT unconditionally.
+     *
+     * It used to be added to every period's opening regardless, which made
+     * an account created today appear, at full balance, in the opening of
+     * every month in history — "Opening ₹19,000" on a period that predated
+     * the account's existence. Gating it on the creation month fixes that;
+     * the seed then shows up as an explicit inflow
+     * (openingBalancesAddedPaise) in whichever period the account was
+     * opened, which is what keeps closing == opening + net true.
+     *
+     * `createdAt` is always present (the schema sets timestamps), but rows
+     * written before it was enabled fall back to the old always-existed
+     * behavior rather than silently losing their balance.
+     */
+    const createdMonthKey = account.createdAt ? monthKeyOfDate(account.createdAt) : null;
+    const seedIsHistoric = createdMonthKey === null || createdMonthKey < fromMonthKey;
+    const seedAddedPaise =
+      createdMonthKey !== null && createdMonthKey >= fromMonthKey && createdMonthKey <= toMonthKey
+        ? account.openingBalancePaise
+        : 0;
+
+    const openingPaise =
+      (seedIsHistoric ? account.openingBalancePaise : 0) + before.inPaise - before.outPaise;
+    // The seed is folded into the row's IN so the table still reads
+    // opening + in − out = closing on every line. Its aggregate lives
+    // separately in openingBalancesAddedPaise for the money-math block.
+    const inPaise = rangeIn + seedAddedPaise;
+    const closingPaise = openingPaise + inPaise - rangeOut;
+
+    perAccount.push({
+      accountId: id,
+      name: account.name,
+      openingPaise,
+      inPaise,
+      outPaise: rangeOut,
+      closingPaise,
+    });
     openingPositionPaise += openingPaise;
     closingPositionPaise += closingPaise;
+    openingBalancesAddedPaise += seedAddedPaise;
   }
 
-  // Every balance-affecting type that does NOT net to zero across accounts
+  // Every balance-affecting flow that does NOT net to zero across accounts
   // has to appear here, or closing !== opening + net and the whole period
   // blanks out behind the reconciliation banner. Transfers and reversals are
-  // absent because they self-cancel; loans are present because they don't.
+  // absent because they self-cancel; loans are present because they don't;
+  // opening balances are present because an account opening with money in it
+  // moves the total position without any ledger row saying so.
   const netCashFlowPaise =
     collectedPaise +
     creditsPaise +
-    loanRepaidPaise -
+    loanRepaidPaise +
+    openingBalancesAddedPaise -
     expensesPaise -
     lentPaise +
     adjustmentsNetPaise;
-  const expectedClosing = openingPositionPaise + netCashFlowPaise;
-  const reconciliationError = closingPositionPaise !== expectedClosing;
 
-  const expenseByCategory: ExpenseByCategoryRow[] = categoryRows.map((r) => ({
-    category: r._id,
-    totalPaise: r.totalPaise,
-    count: r.count,
-  }));
-
-  if (reconciliationError) {
-    return {
-      monthKey: monthKey as MonthKey,
-      openingPositionPaise: 0,
-      billedPaise: 0,
-      collectedPaise: 0,
-      creditsPaise: 0,
-      expensesPaise: 0,
-      lentPaise: 0,
-      loanRepaidPaise: 0,
-      adjustmentsNetPaise: 0,
-      netCashFlowPaise: 0,
-      closingPositionPaise: 0,
-      outstandingDuesPaise: 0,
-      overduePaise: 0,
-      perAccount: [],
-      expenseByCategory: [],
-      reconciliationError: true,
-    };
+  if (closingPositionPaise !== openingPositionPaise + netCashFlowPaise) {
+    return emptyOverview(toMonthKey, true);
   }
 
   return {
-    monthKey: monthKey as MonthKey,
+    monthKey: toMonthKey as MonthKey,
     openingPositionPaise,
+    openingBalancesAddedPaise,
     billedPaise,
     collectedPaise,
     creditsPaise,
@@ -524,7 +598,11 @@ export async function getMonthOverview(monthKey: string): Promise<MonthOverview>
     outstandingDuesPaise: outstanding.outstandingPaise,
     overduePaise: outstanding.overduePaise,
     perAccount,
-    expenseByCategory,
+    expenseByCategory: categoryRows.map((r) => ({
+      category: r._id,
+      totalPaise: r.totalPaise,
+      count: r.count,
+    })),
   };
 }
 
@@ -573,99 +651,6 @@ async function billedRowsFrom(
       dueDate: b.dueDate.toISOString(),
     }))
     .sort((a, b) => b.billedPaise - a.billedPaise);
-}
-
-/** "summed" per Section 4.2: flow figures (billed/collected/credits/
- * expenses/net) sum across the range; position figures (opening/closing)
- * use the range's first/last month; overdue/outstanding are today-relative
- * snapshots, identical regardless of range. */
-export async function getRangeOverview(
-  fromMonthKey: string,
-  toMonthKey: string
-): Promise<MonthOverview> {
-  const monthKeys = enumerateMonthKeys(fromMonthKey, toMonthKey);
-  const overviews = await Promise.all(monthKeys.map((mk) => getMonthOverview(mk)));
-
-  if (overviews.some((o) => o.reconciliationError)) {
-    return {
-      monthKey: toMonthKey as MonthKey,
-      openingPositionPaise: 0,
-      billedPaise: 0,
-      collectedPaise: 0,
-      creditsPaise: 0,
-      expensesPaise: 0,
-      lentPaise: 0,
-      loanRepaidPaise: 0,
-      adjustmentsNetPaise: 0,
-      netCashFlowPaise: 0,
-      closingPositionPaise: 0,
-      outstandingDuesPaise: 0,
-      overduePaise: 0,
-      perAccount: [],
-      expenseByCategory: [],
-      reconciliationError: true,
-    };
-  }
-
-  const first = overviews[0];
-  const last = overviews[overviews.length - 1];
-  if (!first || !last) throw new AppError("VALIDATION", "Invalid month range");
-
-  const categoryTotals = new Map<string, { totalPaise: number; count: number }>();
-  for (const overview of overviews) {
-    for (const row of overview.expenseByCategory) {
-      const existing = categoryTotals.get(row.category) ?? { totalPaise: 0, count: 0 };
-      existing.totalPaise += row.totalPaise;
-      existing.count += row.count;
-      categoryTotals.set(row.category, existing);
-    }
-  }
-
-  const perAccountTotals = new Map<string, PerAccountRow>();
-  for (const row of first.perAccount) {
-    perAccountTotals.set(row.accountId, { ...row, inPaise: 0, outPaise: 0 });
-  }
-  for (const overview of overviews) {
-    for (const row of overview.perAccount) {
-      const existing = perAccountTotals.get(row.accountId);
-      if (existing) {
-        existing.inPaise += row.inPaise;
-        existing.outPaise += row.outPaise;
-      }
-    }
-  }
-  for (const row of last.perAccount) {
-    const existing = perAccountTotals.get(row.accountId);
-    if (existing) existing.closingPaise = row.closingPaise;
-  }
-
-  return {
-    monthKey: toMonthKey as MonthKey,
-    openingPositionPaise: first.openingPositionPaise,
-    billedPaise: overviews.reduce((s, o) => s + o.billedPaise, 0),
-    collectedPaise: overviews.reduce((s, o) => s + o.collectedPaise, 0),
-    creditsPaise: overviews.reduce((s, o) => s + o.creditsPaise, 0),
-    expensesPaise: overviews.reduce((s, o) => s + o.expensesPaise, 0),
-    lentPaise: overviews.reduce((s, o) => s + o.lentPaise, 0),
-    loanRepaidPaise: overviews.reduce((s, o) => s + o.loanRepaidPaise, 0),
-    adjustmentsNetPaise: overviews.reduce((s, o) => s + o.adjustmentsNetPaise, 0),
-    netCashFlowPaise: overviews.reduce((s, o) => s + o.netCashFlowPaise, 0),
-    closingPositionPaise: last.closingPositionPaise,
-    outstandingDuesPaise: last.outstandingDuesPaise,
-    overduePaise: last.overduePaise,
-    perAccount: [...perAccountTotals.values()],
-    expenseByCategory: [...categoryTotals.entries()].map(([category, v]) => ({ category, ...v })),
-  };
-}
-
-function enumerateMonthKeys(fromMonthKey: string, toMonthKey: string): string[] {
-  const keys: string[] = [];
-  let cursor = fromMonthKey;
-  while (cursor <= toMonthKey) {
-    keys.push(cursor);
-    cursor = shiftMonthKey(cursor, 1);
-  }
-  return keys;
 }
 
 // ─────────────────────────────────────────────────────────────────────────

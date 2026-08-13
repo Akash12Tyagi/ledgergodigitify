@@ -8,6 +8,11 @@ import { seedUser, clearAllCollections } from "../../../helpers/seed-user";
 const MONTH_KEY = "2026-07";
 // Any instant inside July 2026 IST.
 const OCCURRED_AT = new Date("2026-07-10T06:00:00.000Z");
+// Accounts in these cases are meant to have existed before the month under
+// test, so their seed balances belong to July's OPENING rather than to its
+// inflows. Left unset, seedAccount stamps `now` and the seed would (rightly)
+// land outside July altogether.
+const OPENED_BEFORE = new Date("2026-01-05T06:00:00.000Z");
 
 describe("getMonthOverview", () => {
   afterEach(async () => {
@@ -21,8 +26,14 @@ describe("getMonthOverview", () => {
       password: "Correct-Horse-Battery-Staple-9",
       role: "owner",
     });
-    const accountA = await seedAccount({ openingBalancePaise: 1_00_000_00 });
-    const accountB = await seedAccount({ openingBalancePaise: 50_000_00 });
+    const accountA = await seedAccount({
+      openingBalancePaise: 1_00_000_00,
+      createdAt: OPENED_BEFORE,
+    });
+    const accountB = await seedAccount({
+      openingBalancePaise: 50_000_00,
+      createdAt: OPENED_BEFORE,
+    });
 
     await seedTransaction(owner._id, {
       type: "PAYMENT_IN",

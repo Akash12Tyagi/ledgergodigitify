@@ -31,9 +31,17 @@ export async function seedAccount(overrides: {
   lowBalanceThresholdPaise?: number | null;
   status?: "active" | "archived";
   reconcileLock?: boolean;
+  /**
+   * When the account was opened. The overview reads this to decide whether
+   * an account's seed opening balance belongs to the period's OPENING (the
+   * account already existed) or to its INFLOWS (it was opened during the
+   * period) — so any test about opening positions has to be able to set it.
+   * Defaults to now, matching a freshly created account.
+   */
+  createdAt?: Date;
 } = {}) {
   await db();
-  return AccountModel.create({
+  const account = await AccountModel.create({
     name: overrides.name ?? `Account ${uniqueKey("acct")}`,
     type: overrides.type ?? "bank",
     openingBalancePaise: overrides.openingBalancePaise ?? 0,
@@ -42,6 +50,19 @@ export async function seedAccount(overrides: {
     status: overrides.status ?? "active",
     reconcileLock: overrides.reconcileLock ?? false,
   });
+
+  if (overrides.createdAt) {
+    // Straight through the driver: Mongoose's own update path re-stamps
+    // `createdAt` from the timestamps plugin, so a model-level $set here is
+    // silently undone.
+    await AccountModel.collection.updateOne(
+      { _id: account._id },
+      { $set: { createdAt: overrides.createdAt } }
+    );
+    account.set("createdAt", overrides.createdAt);
+  }
+
+  return account;
 }
 
 export async function seedClient(

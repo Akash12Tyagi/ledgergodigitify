@@ -9,11 +9,25 @@ import type { ExpenseCategory, ExpenseGeneratedBy, ExpenseStatus } from "@/const
 
 /** Section 7.5 — expense-by-category donut. Category lives on the Expense
  * document, not the ledger transaction, so this aggregate reads from
- * `expenses` filtered by the IST month's UTC instant range. */
-export async function sumExpensesByCategoryInRange(startUTC: Date, endUTC: Date) {
+ * `expenses` filtered by the IST month's UTC instant range.
+ *
+ * `startUTC` is null for an all-time period: there is no earliest month to
+ * turn into an instant, and an invented one would silently drop anything
+ * backdated before it. A null bound means "unbounded on that side", not
+ * "epoch". */
+export async function sumExpensesByCategoryInRange(startUTC: Date | null, endUTC: Date | null) {
   await db();
+  const spentAt: Record<string, Date> = {};
+  if (startUTC) spentAt.$gte = startUTC;
+  if (endUTC) spentAt.$lt = endUTC;
+
   return ExpenseModel.aggregate<{ _id: string; totalPaise: number; count: number }>([
-    { $match: { spentAt: { $gte: startUTC, $lt: endUTC }, status: "active" } },
+    {
+      $match: {
+        ...(Object.keys(spentAt).length > 0 ? { spentAt } : {}),
+        status: "active",
+      },
+    },
     {
       $group: {
         _id: "$category",

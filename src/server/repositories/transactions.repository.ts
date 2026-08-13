@@ -144,9 +144,9 @@ export async function sumInOutForAccountAsOf(
  * real balance-affecting events and must both count, or this overcounts
  * by the reversed amount (scripts/reconcile-fuzz.ts).
  */
-export async function sumInOutByAccountForMonth(
+async function sumInOutByAccountMatching(
   accountIds: string[],
-  monthKey: string
+  monthKeyMatch: unknown
 ): Promise<Map<string, { inPaise: number; outPaise: number }>> {
   await db();
   const validIds = accountIds.map(oid);
@@ -157,7 +157,7 @@ export async function sumInOutByAccountForMonth(
     {
       $match: {
         accountId: { $in: validIds },
-        monthKey,
+        monthKey: monthKeyMatch,
       },
     },
     {
@@ -181,10 +181,28 @@ export async function sumInOutByAccountForMonth(
 }
 
 /**
+ * Per-account net IN/OUT across an inclusive span of reporting months.
+ *
+ * ONE aggregation regardless of how wide the span is — which is what makes
+ * an "all time" period cost the same as a single month. The engine used to
+ * fan a range out into one getMonthOverview call per month (≈11 queries
+ * each), so a two-year range meant ~250 round trips per page load and an
+ * all-time range was not expressible at all.
+ */
+export async function sumInOutByAccountInMonthRange(
+  accountIds: string[],
+  fromMonthKey: string,
+  toMonthKey: string
+): Promise<Map<string, { inPaise: number; outPaise: number }>> {
+  return sumInOutByAccountMatching(accountIds, { $gte: fromMonthKey, $lte: toMonthKey });
+}
+
+/**
  * Per-account net IN/OUT for every transaction with monthKey strictly
  * before `monthKey` — the monthKey-dimension equivalent of "account
- * balance as of the start of this month". "YYYY-MM" sorts correctly under
- * a plain string `$lt` comparison, so no date parsing is needed.
+ * balance as of the start of this period". "YYYY-MM" sorts correctly under
+ * a plain string `$lt` comparison, so no date parsing is needed, and the
+ * all-time floor (ALL_TIME_FROM, "0000-01") correctly matches nothing.
  *
  * Also deliberately NOT filtered to status:"active" — see
  * sumInOutForAccountAsOf's comment.
@@ -193,71 +211,61 @@ export async function sumInOutByAccountBeforeMonth(
   accountIds: string[],
   monthKey: string
 ): Promise<Map<string, { inPaise: number; outPaise: number }>> {
+  return sumInOutByAccountMatching(accountIds, { $lt: monthKey });
+}
+
+export type FlowTotal = { inPaise: number; outPaise: number; totalPaise: number };
+
+/**
+ * Section 4.3 — every per-type flow total the ledger equation needs, for an
+ * inclusive span of reporting months, in ONE aggregation.
+ *
+ * Reads the stored `monthKey` field (matching the
+ * {monthKey:1,type:1,status:1} index — Section 9: no date-range scan), and
+ * "YYYY-MM" compares correctly as a plain string, so the all-time floor
+ * needs no special case.
+ *
+ * Direction is kept alongside the raw total because ADJUSTMENT is the one
+ * type that carries both signs: its contribution to the equation is
+ * Σ(IN) − Σ(OUT), while the direction-locked types (PAYMENT_IN,
+ * EXPENSE_OUT, …) just use `totalPaise`.
+ *
+ * Filtered to status:"active" — unlike the per-account position sums, which
+ * must count reversed originals too. See sumInOutForAccountAsOf: these two
+ * answer different questions, and the difference is load-bearing.
+ */
+export async function sumFlowsByTypeInMonthRange(
+  fromMonthKey: string,
+  toMonthKey: string
+): Promise<Map<TransactionType, FlowTotal>> {
   await db();
-  const validIds = accountIds.map(oid);
   const rows = await TransactionModel.aggregate<{
-    _id: { accountId: Types.ObjectId; direction: "IN" | "OUT" };
+    _id: { type: TransactionType; direction: "IN" | "OUT" };
     total: number;
   }>([
     {
       $match: {
-        accountId: { $in: validIds },
-        monthKey: { $lt: monthKey },
+        monthKey: { $gte: fromMonthKey, $lte: toMonthKey },
+        status: "active",
       },
     },
     {
       $group: {
-        _id: { accountId: "$accountId", direction: "$direction" },
+        _id: { type: "$type", direction: "$direction" },
         total: { $sum: "$amountPaise" },
       },
     },
   ]);
 
-  const result = new Map<string, { inPaise: number; outPaise: number }>();
-  for (const id of accountIds) result.set(id, { inPaise: 0, outPaise: 0 });
+  const result = new Map<TransactionType, FlowTotal>();
   for (const row of rows) {
-    const key = row._id.accountId.toString();
-    const entry = result.get(key) ?? { inPaise: 0, outPaise: 0 };
-    if (row._id.direction === "IN") entry.inPaise = row.total;
-    else entry.outPaise = row.total;
-    result.set(key, entry);
+    const entry = result.get(row._id.type) ?? { inPaise: 0, outPaise: 0, totalPaise: 0 };
+    if (row._id.direction === "IN") entry.inPaise += row.total;
+    else entry.outPaise += row.total;
+    entry.totalPaise += row.total;
+    result.set(row._id.type, entry);
   }
   return result;
-}
-
-/** Section 4.3 — Σ amountPaise for active transactions of the given
- * type(s) in a given monthKey (uses the stored monthKey field, matching
- * the {monthKey:1,type:1,status:1} index — Section 9: no date-range scan
- * needed for this aggregate). */
-export async function sumByTypeAndMonth(
-  monthKey: string,
-  types: TransactionType[]
-): Promise<number> {
-  await db();
-  const [result] = await TransactionModel.aggregate<{ total: number }>([
-    { $match: { monthKey, type: { $in: types }, status: "active" } },
-    { $group: { _id: null, total: { $sum: "$amountPaise" } } },
-  ]);
-  return result?.total ?? 0;
-}
-
-/**
- * Net effect of manual account ADJUSTMENTs on a month: Σ(IN) − Σ(OUT).
- *
- * Adjustments move a real account balance, so the month overview's ledger
- * equation (closing == opening + net) only holds if they are counted as a
- * flow too. Direction-aware — unlike sumByTypeAndMonth, which sums raw
- * amounts — because a single type carries both signs here.
- */
-export async function sumAdjustmentsNetForMonth(monthKey: string): Promise<number> {
-  await db();
-  const rows = await TransactionModel.aggregate<{ _id: "IN" | "OUT"; total: number }>([
-    { $match: { monthKey, type: "ADJUSTMENT", status: "active" } },
-    { $group: { _id: "$direction", total: { $sum: "$amountPaise" } } },
-  ]);
-  let net = 0;
-  for (const row of rows) net += row._id === "IN" ? row.total : -row.total;
-  return net;
 }
 
 /** Grouped version of sumByTypeAndMonth for the 6-month sparkline — one

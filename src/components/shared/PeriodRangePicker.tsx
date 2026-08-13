@@ -7,14 +7,23 @@ import { CalendarRangeIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { setPeriodRangeAction } from "@/components/shared/period-range-actions";
+import {
+  setPeriodAllTimeAction,
+  setPeriodRangeAction,
+} from "@/components/shared/period-range-actions";
 import { usePeriodRangeStore } from "@/components/shared/period-range-store";
+import { cn } from "@/lib/utils";
+import { ALL_TIME_LABEL } from "@/lib/period-range-context";
 import { formatMonthLabel, nowIST, shiftMonthKey, toMonthKey } from "@/lib/dates";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+/** The three ways a period can be expressed, in the order the panel offers
+ * them: the whole record first, one month next, an arbitrary span last. */
+type Mode = "all" | "month" | "custom";
 
 function parseMonthKey(monthKey: string): { year: number; month: number } {
   const [yearStr, monthStr] = monthKey.split("-");
@@ -31,9 +40,9 @@ function range(start: number, end: number): number[] {
   return out;
 }
 
-/** One Month + Year select pair, reused for both the "From" and "To"
- * bounds below — the only difference between them is which side of the
- * range they're allowed to touch (`boundMin`/`boundMax`). */
+/** One Month + Year select pair, reused for the single-month field and for
+ * both bounds of a custom span — the only difference between them is which
+ * side of the range they're allowed to touch (`boundMin`/`boundMax`). */
 function MonthYearFields({
   label,
   value,
@@ -105,16 +114,18 @@ function MonthYearFields({
 }
 
 /**
- * The app-wide From–To period picker: two Month/Year fields plus preset
- * shortcuts, driving every period-scoped figure in the app — the Dashboard,
- * the Ledger Overview's money-math block and transaction list, and the
- * Billed drill-down. All of them read the one cookie pair this writes
+ * The app-wide period picker: All time, one month, or a custom From–To span,
+ * driving every period-scoped figure in the app — the Dashboard, the Ledger
+ * Overview's money-math block and transaction list, and the Billed
+ * drill-down. All of them read the one cookie pair this writes
  * (lib/period-range-context.ts), so the screens can never disagree about
  * which period is being viewed.
  *
- * It replaced MonthPicker, which browsed a single month through a separate
- * cookie: the Ledger and the Dashboard each tracked their own idea of "now"
- * and routinely showed different periods side by side.
+ * All time is the default and the first thing the panel offers. A ledger's
+ * first useful question is "what is the whole picture"; opening on the
+ * current month meant a freshly-loaded app looked empty on the 1st, and hid
+ * every figure entered against an earlier month behind a control the user
+ * had to discover first.
  *
  * `minMonthKey` (optional — the configured go-live date) floors `from`;
  * unset means no lower bound at all. `to` is always capped at the real
@@ -123,55 +134,68 @@ function MonthYearFields({
 export function PeriodRangePicker({
   fromMonthKey,
   toMonthKey: toMonthKeyProp,
+  isAllTime: isAllTimeProp,
   minMonthKey,
 }: {
   fromMonthKey: string;
   toMonthKey: string;
+  isAllTime: boolean;
   minMonthKey?: string | undefined;
 }) {
   const router = useRouter();
-  const { from: storeFrom, to: storeTo, setRange } = usePeriodRangeStore();
+  const { period: storePeriod, setPeriod } = usePeriodRangeStore();
   const [pending, startTransition] = React.useTransition();
   const [open, setOpen] = React.useState(false);
 
   React.useEffect(() => {
-    setRange(fromMonthKey, toMonthKeyProp);
+    setPeriod({ from: fromMonthKey, to: toMonthKeyProp, isAllTime: isAllTimeProp });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync store from the SSR values only
-  }, [fromMonthKey, toMonthKeyProp]);
+  }, [fromMonthKey, toMonthKeyProp, isAllTimeProp]);
 
-  const from = storeFrom || fromMonthKey;
-  const to = storeTo || toMonthKeyProp;
+  const period = storePeriod ?? { from: fromMonthKey, to: toMonthKeyProp, isAllTime: isAllTimeProp };
   const currentRealMonth = toMonthKey(nowIST());
   const floor = minMonthKey ?? "0001-01";
+
+  // All time has no editable bounds — its `from` is the "0000-01" query
+  // floor, which must never reach a Month/Year field. The panel edits the
+  // current month instead, so switching to Month or Custom starts somewhere
+  // real rather than in year zero.
+  const from = period.isAllTime ? currentRealMonth : period.from;
+  const to = period.isAllTime ? currentRealMonth : period.to;
+  const mode: Mode = period.isAllTime ? "all" : from === to ? "month" : "custom";
 
   function navigate(nextFrom: string, nextTo: string) {
     const clampedTo = nextTo > currentRealMonth ? currentRealMonth : nextTo;
     const clampedFrom = nextFrom < floor ? floor : nextFrom;
     const safeFrom = clampedFrom > clampedTo ? clampedTo : clampedFrom;
-    setRange(safeFrom, clampedTo);
+    setPeriod({ from: safeFrom, to: clampedTo, isAllTime: false });
     startTransition(async () => {
       await setPeriodRangeAction(safeFrom, clampedTo);
       router.refresh();
     });
   }
 
+  function selectAllTime() {
+    setPeriod({ from, to: currentRealMonth, isAllTime: true });
+    startTransition(async () => {
+      await setPeriodAllTimeAction();
+      router.refresh();
+    });
+    setOpen(false);
+  }
+
   function shiftWindow(delta: number) {
     navigate(shiftMonthKey(from, delta), shiftMonthKey(to, delta));
   }
 
-  const canGoPrev = !minMonthKey || shiftMonthKey(from, -1) >= minMonthKey;
-  const canGoNext = shiftMonthKey(to, 1) <= currentRealMonth;
-  const isSingleMonth = from === to;
-  const isCurrentMonthOnly = isSingleMonth && to === currentRealMonth;
+  const canGoPrev = !period.isAllTime && (!minMonthKey || shiftMonthKey(from, -1) >= minMonthKey);
+  const canGoNext = !period.isAllTime && shiftMonthKey(to, 1) <= currentRealMonth;
 
-  const label = isSingleMonth
-    ? formatMonthLabel(to)
-    : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`;
-
-  function applyPreset(nextFrom: string, nextTo: string) {
-    navigate(nextFrom, nextTo);
-    setOpen(false);
-  }
+  const label = period.isAllTime
+    ? ALL_TIME_LABEL
+    : from === to
+      ? formatMonthLabel(to)
+      : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`;
 
   return (
     <div className="flex items-center gap-1">
@@ -194,48 +218,92 @@ export function PeriodRangePicker({
         </PopoverTrigger>
         <PopoverContent align="center" className="w-80">
           <div className="grid gap-3">
-            <MonthYearFields
-              label="From"
-              value={from}
-              boundMin={floor}
-              boundMax={to}
-              disabled={pending}
-              onChange={(next) => navigate(next, to)}
-            />
-            <MonthYearFields
-              label="To"
-              value={to}
-              boundMin={from}
-              boundMax={currentRealMonth}
-              disabled={pending}
-              onChange={(next) => navigate(from, next)}
-            />
-            <div className="grid grid-cols-2 gap-1.5 pt-1">
-              <Button variant="ghost" size="sm" onClick={() => applyPreset(currentRealMonth, currentRealMonth)}>
-                This Month
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => applyPreset(shiftMonthKey(currentRealMonth, -2), currentRealMonth)}
-              >
-                Last 3 Months
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => applyPreset(shiftMonthKey(currentRealMonth, -5), currentRealMonth)}
-              >
-                Last 6 Months
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => applyPreset(buildMonthKey(parseMonthKey(currentRealMonth).year, 1), currentRealMonth)}
-              >
-                Year to Date
-              </Button>
+            <div
+              role="radiogroup"
+              aria-label="Period type"
+              className="grid grid-cols-3 gap-1 rounded-md bg-muted p-1"
+            >
+              <ModeTab
+                label={ALL_TIME_LABEL}
+                active={mode === "all"}
+                disabled={pending}
+                onSelect={selectAllTime}
+              />
+              <ModeTab
+                label="Month"
+                active={mode === "month"}
+                disabled={pending}
+                onSelect={() => navigate(to, to)}
+              />
+              <ModeTab
+                label="Custom"
+                active={mode === "custom"}
+                disabled={pending}
+                // A custom span has to start as an actual span, or the panel
+                // would switch to "Custom" and immediately read back as
+                // "Month" because from still equals to.
+                onSelect={() => navigate(shiftMonthKey(to, -2), to)}
+              />
             </div>
+
+            {mode === "all" ? (
+              <p className="text-xs text-muted-foreground">
+                Every figure on this screen covers the whole record, from the first entry to today.
+              </p>
+            ) : mode === "month" ? (
+              <MonthYearFields
+                label="Month"
+                value={to}
+                boundMin={floor}
+                boundMax={currentRealMonth}
+                disabled={pending}
+                onChange={(next) => navigate(next, next)}
+              />
+            ) : (
+              <>
+                <MonthYearFields
+                  label="From"
+                  value={from}
+                  boundMin={floor}
+                  boundMax={to}
+                  disabled={pending}
+                  onChange={(next) => navigate(next, to)}
+                />
+                <MonthYearFields
+                  label="To"
+                  value={to}
+                  boundMin={from}
+                  boundMax={currentRealMonth}
+                  disabled={pending}
+                  onChange={(next) => navigate(from, next)}
+                />
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate(shiftMonthKey(currentRealMonth, -2), currentRealMonth)}
+                  >
+                    3 Months
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate(shiftMonthKey(currentRealMonth, -5), currentRealMonth)}
+                  >
+                    6 Months
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      navigate(buildMonthKey(parseMonthKey(currentRealMonth).year, 1), currentRealMonth)
+                    }
+                  >
+                    YTD
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </PopoverContent>
       </Popover>
@@ -250,16 +318,41 @@ export function PeriodRangePicker({
         <ChevronRight className="size-4" />
       </Button>
 
-      {!isCurrentMonthOnly ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate(currentRealMonth, currentRealMonth)}
-          disabled={pending}
-        >
-          Today
+      {!period.isAllTime ? (
+        <Button variant="ghost" size="sm" onClick={selectAllTime} disabled={pending}>
+          {ALL_TIME_LABEL}
         </Button>
       ) : null}
     </div>
+  );
+}
+
+function ModeTab({
+  label,
+  active,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  active: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        "rounded-sm px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {label}
+    </button>
   );
 }

@@ -172,10 +172,18 @@ export async function findBillingsInMonthRange(fromMonthKey: string, toMonthKey:
   }).lean();
 }
 
-export async function sumBilledForMonth(monthKey: string): Promise<number> {
+/** Σ billedPaise across an inclusive span of reporting months. One
+ * aggregation however wide the span, so an all-time period costs the same
+ * as a single month. Selects `billedPaise` only — carriedInPaise is
+ * deliberately excluded, matching findBillingsInMonthRange's drill-down
+ * rows so the card still equals the sum of the list beneath it. */
+export async function sumBilledInMonthRange(
+  fromMonthKey: string,
+  toMonthKey: string
+): Promise<number> {
   await db();
   const [result] = await MonthlyBillingModel.aggregate<{ total: number }>([
-    { $match: { monthKey } },
+    { $match: { monthKey: { $gte: fromMonthKey, $lte: toMonthKey } } },
     { $group: { _id: null, total: { $sum: "$billedPaise" } } },
   ]);
   return result?.total ?? 0;

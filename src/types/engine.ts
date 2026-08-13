@@ -78,6 +78,16 @@ export interface ExpenseByCategoryRow {
 export interface MonthOverview {
   monthKey: MonthKey;
   openingPositionPaise: number;
+  /**
+   * Σ seed `openingBalancePaise` of every account CREATED within this
+   * period. An account's opening balance is money declared into existence
+   * rather than moved by a ledger row, so it has to enter the equation once,
+   * in the period the account was opened — otherwise it would either be
+   * missing from the total position or (as it used to be) present in the
+   * opening of every month in history, including months before the account
+   * existed. Counted as an inflow inside netCashFlowPaise.
+   */
+  openingBalancesAddedPaise: number;
   billedPaise: number;
   collectedPaise: number;
   creditsPaise: number;

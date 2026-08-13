@@ -10,8 +10,13 @@ import { DevSumAssertion } from "@/components/shared/DevSumAssertion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBilledClientsForRange, getRangeOverview } from "@/server/services/financial-engine";
 import { requireUser } from "@/server/auth/guards";
-import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
-import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
+import {
+  PERIOD_FROM_COOKIE,
+  PERIOD_TO_COOKIE,
+  formatPeriodRangeLabel,
+  resolvePeriodRange,
+} from "@/lib/period-range-context";
+import { nowIST, toMonthKey } from "@/lib/dates";
 
 export const metadata: Metadata = { title: "Billed — Finance & Ledger" };
 export const dynamic = "force-dynamic";
@@ -23,11 +28,12 @@ export const dynamic = "force-dynamic";
 export default async function LedgerBilledPage() {
   await requireUser("viewer");
   const cookieStore = await cookies();
-  const { from: fromMonthKey, to: toMonthKeyValue } = resolvePeriodRange(
+  const period = resolvePeriodRange(
     cookieStore.get(PERIOD_FROM_COOKIE)?.value,
     cookieStore.get(PERIOD_TO_COOKIE)?.value,
     toMonthKey(nowIST())
   );
+  const { from: fromMonthKey, to: toMonthKeyValue } = period;
 
   const [rows, overview] = await Promise.all([
     getBilledClientsForRange(fromMonthKey, toMonthKeyValue),
@@ -35,10 +41,7 @@ export default async function LedgerBilledPage() {
   ]);
 
   const actualPaise = rows.reduce((sum, r) => sum + r.billedPaise, 0);
-  const rangeLabel =
-    fromMonthKey === toMonthKeyValue
-      ? formatMonthLabel(toMonthKeyValue)
-      : `${formatMonthLabel(fromMonthKey)} – ${formatMonthLabel(toMonthKeyValue)}`;
+  const rangeLabel = formatPeriodRangeLabel(period);
 
   return (
     <div>

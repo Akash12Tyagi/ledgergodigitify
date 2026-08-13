@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       ...(type ? { type } : {}),
     });
 
-    const periodLabel = period.from === period.to ? period.from : `${period.from}_${period.to}`;
+    const periodLabel = period.slug;
 
     await logAudit({
       actorUserId: actor.id,

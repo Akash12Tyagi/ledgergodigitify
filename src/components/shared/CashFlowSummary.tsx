@@ -11,13 +11,21 @@ type Part = { label: string; paise: number; href?: string };
  *
  *     Opening  +  Money in  −  Money out  =  Closing
  *
- * The previous version rendered eight equal-weight cards in a flat grid,
- * which hid two things worth seeing. First, that these figures form a single
+ * The first version rendered eight equal-weight cards in a flat grid, which
+ * hid two things worth seeing. First, that these figures form a single
  * arithmetic chain — nothing in the layout said the first four add up to the
  * last. Second, that "Billed" was sitting among them despite not being cash
  * at all: money invoiced is not money received, and totalling it beside
  * Collected invites exactly the wrong conclusion. Billed now lives in its
  * own "owed to you" block, outside this equation.
+ *
+ * The version after that kept the chain but drew all four terms as columns
+ * of one card, with each breakdown line stretched edge-to-edge inside its
+ * column. At full width the line items ended up further from their own
+ * heading than from the next column's operator, so "Collected from clients
+ * … ₹79,920" read as if the amount belonged to the column on its right.
+ * Each term is now its own card: a card is a boundary the eye already
+ * trusts, so a figure can no longer appear to sit under the wrong heading.
  *
  * Adjustments net out either way, so they are filed under whichever side
  * their sign puts them on; that keeps in − out = net true on screen instead
@@ -25,6 +33,7 @@ type Part = { label: string; paise: number; href?: string };
  */
 export function CashFlowSummary({
   openingPaise,
+  openingBalancesAddedPaise,
   collectedPaise,
   creditsPaise,
   expensesPaise,
@@ -34,6 +43,7 @@ export function CashFlowSummary({
   closingPaise,
 }: {
   openingPaise: number;
+  openingBalancesAddedPaise: number;
   collectedPaise: number;
   creditsPaise: number;
   expensesPaise: number;
@@ -65,6 +75,13 @@ export function CashFlowSummary({
     ...(adjustmentsIn > 0
       ? [{ label: "Adjustments", paise: adjustmentsIn, href: "/ledger/overview?type=ADJUSTMENT" }]
       : []),
+    // No drill-down: an account's opening balance is declared at creation,
+    // not posted as a ledger row, so there is no transaction list to send
+    // anyone to. It is here because it moves the closing position and the
+    // equation would otherwise be short by exactly this much.
+    ...(openingBalancesAddedPaise > 0
+      ? [{ label: "Account opening balances", paise: openingBalancesAddedPaise }]
+      : []),
   ];
   const outParts: Part[] = [
     { label: "Expenses paid", paise: expensesPaise, href: "/ledger/overview?type=EXPENSE_OUT" },
@@ -91,35 +108,33 @@ export function CashFlowSummary({
   }
 
   return (
-    <Card>
-      <CardContent className="grid gap-0 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr]">
-        <Column title="Opening" total={openingPaise} hint="What you started the period with" href="#per-account" />
-        <Operator symbol="+" />
-        <Column title="Money in" total={totalIn} tone="in" parts={inParts} />
-        <Operator symbol="−" />
-        <Column title="Money out" total={totalOut} tone="out" parts={outParts} />
-        <Operator symbol="=" />
-        <Column title="Closing" total={closingPaise} hint="Across every account" href="#per-account" emphasis />
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Visible on desktop as the maths it is; on mobile the columns stack, so
- * the operator becomes a divider rather than a floating symbol. */
-function Operator({ symbol }: { symbol: string }) {
-  return (
-    <div
-      aria-hidden="true"
-      className="flex items-center justify-center py-2 text-lg font-medium text-muted-foreground md:px-3 md:py-0"
-    >
-      <span className="hidden md:inline">{symbol}</span>
-      <span className="h-px w-full bg-border md:hidden" />
+    <div className="grid items-stretch gap-2 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:gap-0">
+      <Term title="Opening" total={openingPaise} hint="Position at the start of the period" href="#per-account" />
+      <Operator symbol="+" />
+      <Term title="Money in" total={totalIn} tone="in" parts={inParts} />
+      <Operator symbol="−" />
+      <Term title="Money out" total={totalOut} tone="out" parts={outParts} />
+      <Operator symbol="=" />
+      <Term title="Closing" total={closingPaise} hint="Across every account" href="#per-account" emphasis />
     </div>
   );
 }
 
-function Column({
+/** Visible on desktop as the maths it is; on mobile the cards stack, so the
+ * operator becomes a centered symbol between them rather than a floating
+ * one beside them. */
+function Operator({ symbol }: { symbol: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex items-center justify-center text-lg font-medium text-muted-foreground md:px-2"
+    >
+      {symbol}
+    </div>
+  );
+}
+
+function Term({
   title,
   total,
   parts,
@@ -141,8 +156,7 @@ function Column({
       className={cn(
         "text-2xl font-semibold tabular-nums",
         tone === "in" && "text-money-in",
-        tone === "out" && "text-money-out",
-        emphasis && "text-2xl"
+        tone === "out" && "text-money-out"
       )}
     >
       {formatINR(total)}
@@ -150,32 +164,34 @@ function Column({
   );
 
   return (
-    <div className="grid content-start gap-1 py-2">
-      <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      {href ? (
-        <Link href={href} className="w-fit rounded-sm hover:underline">
-          {amount}
-        </Link>
-      ) : (
-        amount
-      )}
-      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
-      {parts && parts.length > 0 ? (
-        <ul className="mt-1 grid gap-0.5">
-          {parts.map((part) => (
-            <li key={part.label} className="flex items-baseline justify-between gap-3 text-xs">
-              {part.href ? (
-                <Link href={part.href} className="text-muted-foreground hover:underline">
-                  {part.label}
-                </Link>
-              ) : (
-                <span className="text-muted-foreground">{part.label}</span>
-              )}
-              <span className="tabular-nums">{formatINR(part.paise)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
+    <Card className={cn("h-full", emphasis && "border-foreground/20 bg-muted/30")}>
+      <CardContent className="grid content-start gap-1 py-4">
+        <p className="text-xs font-medium text-muted-foreground">{title}</p>
+        {href ? (
+          <Link href={href} className="w-fit rounded-sm hover:underline">
+            {amount}
+          </Link>
+        ) : (
+          amount
+        )}
+        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+        {parts && parts.length > 0 ? (
+          <ul className="mt-2 grid gap-1 border-t pt-2">
+            {parts.map((part) => (
+              <li key={part.label} className="flex items-baseline justify-between gap-2 text-xs">
+                {part.href ? (
+                  <Link href={part.href} className="text-muted-foreground hover:underline">
+                    {part.label}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">{part.label}</span>
+                )}
+                <span className="tabular-nums">{formatINR(part.paise)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

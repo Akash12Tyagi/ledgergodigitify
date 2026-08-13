@@ -14,8 +14,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRangeOverview, listTransactions, sumFilteredTransactions } from "@/server/services/financial-engine";
 import { getSettings } from "@/server/services/settings.service";
 import { requireUser } from "@/server/auth/guards";
-import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
-import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
+import {
+  PERIOD_FROM_COOKIE,
+  PERIOD_TO_COOKIE,
+  formatPeriodRangeLabel,
+  resolvePeriodRange,
+} from "@/lib/period-range-context";
+import { nowIST, toMonthKey } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import { TRANSACTION_TYPES, type TransactionType } from "@/constants/domain";
@@ -40,11 +45,12 @@ export default async function LedgerOverviewPage({
   const params = await searchParams;
   const cookieStore = await cookies();
   // The same cookie pair the Dashboard reads — one period for the whole app.
-  const { from: fromMonthKey, to: toMonthKeyValue } = resolvePeriodRange(
+  const period = resolvePeriodRange(
     cookieStore.get(PERIOD_FROM_COOKIE)?.value,
     cookieStore.get(PERIOD_TO_COOKIE)?.value,
     toMonthKey(nowIST())
   );
+  const { from: fromMonthKey, to: toMonthKeyValue } = period;
 
   const page = Math.max(1, Number(params.page ?? "1"));
   const pageSize = Math.max(1, Number(params.pageSize ?? String(PAGE_SIZE_DEFAULT)));
@@ -66,10 +72,7 @@ export default async function LedgerOverviewPage({
   ]);
 
   const minMonthKey = settings.goLiveDate ? toMonthKey(settings.goLiveDate) : undefined;
-  const rangeLabel =
-    fromMonthKey === toMonthKeyValue
-      ? formatMonthLabel(toMonthKeyValue)
-      : `${formatMonthLabel(fromMonthKey)} – ${formatMonthLabel(toMonthKeyValue)}`;
+  const rangeLabel = formatPeriodRangeLabel(period);
 
   let assertionLabel: string | null = null;
   let expectedPaise = 0;
@@ -98,6 +101,7 @@ export default async function LedgerOverviewPage({
           <PeriodRangePicker
             fromMonthKey={fromMonthKey}
             toMonthKey={toMonthKeyValue}
+            isAllTime={period.isAllTime}
             minMonthKey={minMonthKey}
           />
         }
@@ -115,6 +119,7 @@ export default async function LedgerOverviewPage({
             <h2 className="text-sm font-medium">Cash — {rangeLabel}</h2>
             <CashFlowSummary
               openingPaise={overview.openingPositionPaise}
+              openingBalancesAddedPaise={overview.openingBalancesAddedPaise}
               collectedPaise={overview.collectedPaise}
               creditsPaise={overview.creditsPaise}
               expensesPaise={overview.expensesPaise}

@@ -16,8 +16,13 @@ import { getOutstandingBorrowedTotal } from "@/server/services/borrowings.servic
 import { getSettings } from "@/server/services/settings.service";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { requireUser } from "@/server/auth/guards";
-import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
-import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
+import {
+  PERIOD_FROM_COOKIE,
+  PERIOD_TO_COOKIE,
+  formatPeriodRangeLabel,
+  resolvePeriodRange,
+} from "@/lib/period-range-context";
+import { nowIST, toMonthKey } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
 import type { AccountStripItem, DueRow, TxRow } from "@/types/engine";
 
@@ -38,11 +43,12 @@ export default async function DashboardPage() {
   await requireUser("viewer");
   const cookieStore = await cookies();
   const currentRealMonth = toMonthKey(nowIST());
-  const { from: fromMonthKey, to: toMonthKeyValue } = resolvePeriodRange(
+  const period = resolvePeriodRange(
     cookieStore.get(PERIOD_FROM_COOKIE)?.value,
     cookieStore.get(PERIOD_TO_COOKIE)?.value,
     currentRealMonth
   );
+  const { from: fromMonthKey, to: toMonthKeyValue } = period;
 
   const [data, settings, pendingExpenses, lentOutPaise] = await Promise.all([
     getDashboardRangeData(fromMonthKey, toMonthKeyValue),
@@ -58,10 +64,7 @@ export default async function DashboardPage() {
   // history is still short (everything shows ₹0 for empty months, which is
   // correct, not broken).
   const minMonthKey = settings.goLiveDate ? toMonthKey(settings.goLiveDate) : undefined;
-  const rangeLabel =
-    fromMonthKey === toMonthKeyValue
-      ? formatMonthLabel(toMonthKeyValue)
-      : `${formatMonthLabel(fromMonthKey)} – ${formatMonthLabel(toMonthKeyValue)}`;
+  const rangeLabel = formatPeriodRangeLabel(period);
 
   return (
     <div>
@@ -71,6 +74,7 @@ export default async function DashboardPage() {
           <PeriodRangePicker
             fromMonthKey={fromMonthKey}
             toMonthKey={toMonthKeyValue}
+            isAllTime={period.isAllTime}
             minMonthKey={minMonthKey}
           />
         }
