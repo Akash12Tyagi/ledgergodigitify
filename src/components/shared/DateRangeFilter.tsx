@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  ALL_TIME_LABEL,
   DATE_FROM_PARAM,
   DATE_PRESETS,
   DATE_TO_PARAM,
-  formatISODateDisplay,
+  describeDateWindow,
   toISODateIST,
 } from "@/lib/date-range";
 
@@ -22,21 +23,19 @@ import {
  * Separate from PeriodRangePicker on purpose: that one drives the app-wide
  * month period behind every aggregate figure, and lives in a cookie so the
  * Dashboard and Overview can never disagree. This one narrows a single list
- * to real days and stays in the URL, so it can be shared and does not leak
- * into other screens.
+ * to real days, stays in the URL so it can be shared, and does not leak into
+ * other screens.
  *
- * With no dates set the list inherits the month period, which is why the
- * trigger reads "Any date in period" rather than pretending to be unset.
+ * With no dates set the list shows everything — "All time" is both the
+ * default and an explicit choice in the panel, so getting back to the whole
+ * record set is one click rather than a guess at which months to pick.
  */
 export function DateRangeFilter({
   from,
   to,
-  fallbackLabel,
 }: {
   from: string | null;
   to: string | null;
-  /** What the list is scoped to when no exact dates are chosen. */
-  fallbackLabel: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -60,7 +59,7 @@ export function DateRangeFilter({
   }
 
   const today = toISODateIST(new Date());
-  const isExact = Boolean(from && to);
+  const isFiltered = Boolean(from || to);
 
   function apply(nextFrom: string, nextTo: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -76,9 +75,7 @@ export function DateRangeFilter({
     });
   }
 
-  const label = isExact
-    ? `${formatISODateDisplay(from!)} – ${formatISODateDisplay(to!)}`
-    : fallbackLabel;
+  const label = describeDateWindow(from, to);
 
   return (
     <div className="flex items-center gap-1">
@@ -91,7 +88,19 @@ export function DateRangeFilter({
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80">
           <div className="grid gap-3">
-            <div className="grid grid-cols-2 gap-1.5">
+            {/* Full width and first, ahead of the narrowing presets: it is
+                the default state, and the one people reach for when a row
+                they just recorded is not where they expected it. */}
+            <Button
+              variant={isFiltered ? "ghost" : "secondary"}
+              size="sm"
+              className="w-full"
+              onClick={() => apply("", "")}
+            >
+              {ALL_TIME_LABEL}
+            </Button>
+
+            <div className="grid grid-cols-2 gap-1.5 border-t pt-3">
               {DATE_PRESETS.map((preset) => (
                 <Button
                   key={preset.id}
@@ -148,11 +157,11 @@ export function DateRangeFilter({
         </PopoverContent>
       </Popover>
 
-      {isExact ? (
+      {isFiltered ? (
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Clear date filter"
+          aria-label="Clear date filter — show all time"
           disabled={pending}
           onClick={() => apply("", "")}
         >

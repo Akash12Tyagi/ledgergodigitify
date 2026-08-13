@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   DATE_PRESETS,
+  describeDateWindow,
   isValidISODate,
   resolveDateRange,
   toISODateIST,
 } from "@/lib/date-range";
-
-const FALLBACK = { from: "2026-08", to: "2026-08" };
 
 describe("date-range — isValidISODate", () => {
   it("accepts a real IST calendar date", () => {
@@ -36,56 +35,73 @@ describe("date-range — isValidISODate", () => {
 });
 
 describe("date-range — resolveDateRange", () => {
-  it("falls back to the month period when no dates are given", () => {
-    const result = resolveDateRange(undefined, undefined, FALLBACK);
-    expect(result.isExact).toBe(false);
+  // The default is ALL TIME. It used to inherit the app-wide month period,
+  // which silently hid anything dated outside it — a backdated entry
+  // disappeared the moment it was saved.
+  it("applies no window at all when no dates are given", () => {
+    const result = resolveDateRange(undefined, undefined);
+    expect(result.isFiltered).toBe(false);
     expect(result.from).toBeNull();
-    expect(toISODateIST(result.startUTC)).toBe("2026-08-01");
-    // Exclusive end — the instant September begins.
-    expect(toISODateIST(result.endUTC)).toBe("2026-09-01");
+    expect(result.to).toBeNull();
+    expect(result.startUTC).toBeUndefined();
+    expect(result.endUTC).toBeUndefined();
   });
 
   it("uses exact dates when both are given", () => {
-    const result = resolveDateRange("2026-08-15", "2026-09-03", FALLBACK);
-    expect(result.isExact).toBe(true);
-    expect(toISODateIST(result.startUTC)).toBe("2026-08-15");
+    const result = resolveDateRange("2026-08-15", "2026-09-03");
+    expect(result.isFiltered).toBe(true);
+    expect(toISODateIST(result.startUTC!)).toBe("2026-08-15");
     // 3 Sep is INCLUSIVE, so the exclusive bound is the 4th.
-    expect(toISODateIST(result.endUTC)).toBe("2026-09-04");
+    expect(toISODateIST(result.endUTC!)).toBe("2026-09-04");
   });
 
   it("makes a single-day range cover that whole day", () => {
-    const result = resolveDateRange("2026-08-15", "2026-08-15", FALLBACK);
-    expect(result.endUTC.getTime() - result.startUTC.getTime()).toBe(24 * 60 * 60 * 1000);
+    const result = resolveDateRange("2026-08-15", "2026-08-15");
+    expect(result.endUTC!.getTime() - result.startUTC!.getTime()).toBe(24 * 60 * 60 * 1000);
   });
 
   it("swaps an inverted pair instead of returning an empty window", () => {
-    const result = resolveDateRange("2026-09-03", "2026-08-15", FALLBACK);
+    const result = resolveDateRange("2026-09-03", "2026-08-15");
     expect(result.from).toBe("2026-08-15");
     expect(result.to).toBe("2026-09-03");
-    expect(result.endUTC.getTime()).toBeGreaterThan(result.startUTC.getTime());
+    expect(result.endUTC!.getTime()).toBeGreaterThan(result.startUTC!.getTime());
   });
 
-  it("fills the missing side from the fallback period when only one bound is given", () => {
-    const onlyFrom = resolveDateRange("2026-08-10", undefined, FALLBACK);
-    expect(onlyFrom.isExact).toBe(true);
+  it("leaves the other end open when only one bound is given", () => {
+    const onlyFrom = resolveDateRange("2026-08-10", undefined);
+    expect(onlyFrom.isFiltered).toBe(true);
     expect(onlyFrom.from).toBe("2026-08-10");
-    expect(onlyFrom.to).toBe("2026-08-31");
+    expect(onlyFrom.to).toBeNull();
+    expect(toISODateIST(onlyFrom.startUTC!)).toBe("2026-08-10");
+    expect(onlyFrom.endUTC).toBeUndefined();
 
-    const onlyTo = resolveDateRange(undefined, "2026-08-10", FALLBACK);
-    expect(onlyTo.from).toBe("2026-08-01");
+    const onlyTo = resolveDateRange(undefined, "2026-08-10");
+    expect(onlyTo.from).toBeNull();
     expect(onlyTo.to).toBe("2026-08-10");
+    expect(onlyTo.startUTC).toBeUndefined();
+    expect(toISODateIST(onlyTo.endUTC!)).toBe("2026-08-11");
   });
 
-  it("ignores a malformed date rather than erroring", () => {
-    const result = resolveDateRange("not-a-date", "also-bad", FALLBACK);
-    expect(result.isExact).toBe(false);
-    expect(toISODateIST(result.startUTC)).toBe("2026-08-01");
+  it("ignores a malformed date rather than erroring — falling back to all time", () => {
+    const result = resolveDateRange("not-a-date", "also-bad");
+    expect(result.isFiltered).toBe(false);
+    expect(result.startUTC).toBeUndefined();
+    expect(result.endUTC).toBeUndefined();
+  });
+});
+
+describe("date-range — describeDateWindow", () => {
+  it("names the unfiltered state 'All time'", () => {
+    expect(describeDateWindow(null, null)).toBe("All time");
   });
 
-  it("spans months correctly when the fallback covers several", () => {
-    const result = resolveDateRange(undefined, undefined, { from: "2026-06", to: "2026-08" });
-    expect(toISODateIST(result.startUTC)).toBe("2026-06-01");
-    expect(toISODateIST(result.endUTC)).toBe("2026-09-01");
+  it("names a closed range with both endpoints", () => {
+    expect(describeDateWindow("2026-04-23", "2026-08-13")).toBe("23 Apr 2026 – 13 Aug 2026");
+  });
+
+  it("names a half-open range honestly rather than inventing the missing end", () => {
+    expect(describeDateWindow("2026-04-23", null)).toBe("Since 23 Apr 2026");
+    expect(describeDateWindow(null, "2026-04-23")).toBe("Until 23 Apr 2026");
   });
 });
 
@@ -114,8 +130,8 @@ describe("date-range — presets", () => {
 
   it("'last 7 days' spans exactly 7 inclusive days", () => {
     const { from, to } = DATE_PRESETS.find((p) => p.id === "last7")!.range();
-    const range = resolveDateRange(from, to, FALLBACK);
-    const days = (range.endUTC.getTime() - range.startUTC.getTime()) / (24 * 60 * 60 * 1000);
+    const range = resolveDateRange(from, to);
+    const days = (range.endUTC!.getTime() - range.startUTC!.getTime()) / (24 * 60 * 60 * 1000);
     expect(days).toBe(7);
   });
 });

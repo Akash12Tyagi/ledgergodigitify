@@ -1,13 +1,10 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ExpensesTableView } from "@/features/expenses/components/ExpensesTableView";
 import { getPendingExpenseCount, listExpenses } from "@/server/services/expenses.service";
 import { requireUser } from "@/server/auth/guards";
-import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
-import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
-import { formatISODateDisplay, resolveDateRange } from "@/lib/date-range";
+import { describeDateWindow, resolveDateRange } from "@/lib/date-range";
 import { DateRangeFilter } from "@/components/shared/DateRangeFilter";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import type { ExpenseCategory, ExpenseStatus } from "@/constants/domain";
@@ -29,17 +26,10 @@ export default async function ExpensesPage({
   const category = (params.category as ExpenseCategory | "all" | undefined) ?? "all";
   const status = (params.status as ExpenseStatus | "all" | undefined) ?? "active";
 
-  // Scoped to the app-wide period, so this list and the Overview's Expenses
-  // card always describe the same span of time.
-  const cookieStore = await cookies();
-  const { from, to } = resolvePeriodRange(
-    cookieStore.get(PERIOD_FROM_COOKIE)?.value,
-    cookieStore.get(PERIOD_TO_COOKIE)?.value,
-    toMonthKey(nowIST())
-  );
-  // Exact ?from/?to dates win over the month period when present; with
-  // neither, this falls back to the very same months the Overview totals.
-  const dateRange = resolveDateRange(params.from, params.to, { from, to });
+  // All time unless ?from/?to narrow it. The list is the record of what was
+  // spent; the Overview's Expenses card is what a given month totals, and
+  // the two are allowed to describe different spans.
+  const dateRange = resolveDateRange(params.from, params.to);
 
   /**
    * The approvals queue deliberately IGNORES both date filters. A pending
@@ -51,7 +41,12 @@ export default async function ExpensesPage({
   const periodScope =
     status === "pending"
       ? {}
-      : { spentFrom: dateRange.startUTC, spentTo: dateRange.endUTC };
+      : {
+          // Spread, not `undefined`: on All time the keys must be absent, or
+          // the repository builds an empty `$gte`/`$lt` matching nothing.
+          ...(dateRange.startUTC ? { spentFrom: dateRange.startUTC } : {}),
+          ...(dateRange.endUTC ? { spentTo: dateRange.endUTC } : {}),
+        };
 
   const [result, pendingCount] = await Promise.all([
     listExpenses({ category, status, page, pageSize, ...periodScope }),
@@ -60,11 +55,7 @@ export default async function ExpensesPage({
 
   // The picker's own wording, reused by the empty state so the two name the
   // same span identically.
-  const periodLabel =
-    from === to ? formatMonthLabel(to) : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`;
-  const rangeLabel = dateRange.isExact
-    ? `${formatISODateDisplay(dateRange.from!)} – ${formatISODateDisplay(dateRange.to!)}`
-    : periodLabel;
+  const rangeLabel = describeDateWindow(dateRange.from, dateRange.to);
 
   return (
     <div>
@@ -81,9 +72,7 @@ export default async function ExpensesPage({
         // finer-grained one, which falls back to — and displays — whatever
         // month period those screens are on, so the two never disagree
         // silently.
-        action={
-          <DateRangeFilter from={dateRange.from} to={dateRange.to} fallbackLabel={periodLabel} />
-        }
+        action={<DateRangeFilter from={dateRange.from} to={dateRange.to} />}
       />
       <ExpensesTableView
         rows={result.rows}

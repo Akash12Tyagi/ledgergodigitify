@@ -6,10 +6,13 @@ import { monthRangeToUtc, nowIST, toMonthKey } from "@/lib/dates";
 /**
  * The app-wide period, read the same way every page reads it.
  *
- * Exports promise "the rows you see on screen, in a file" (Section 7.13),
- * and the screens are now period-scoped — so the export routes have to read
- * the same cookie pair, or a download would silently contain rows from
- * outside the period the user was looking at.
+ * Exports promise "the rows you see on screen, in a file" (Section 7.13).
+ * Only the TRANSACTIONS export still uses this, because the screen it
+ * mirrors — the Ledger Overview's transaction list — is still scoped to the
+ * month period. The credits and expenses exports resolve their window from
+ * their own ?from/?to and default to all time, exactly as those lists do
+ * (lib/date-range.ts); reading this cookie there would have put fewer rows
+ * in the file than the list was showing.
  */
 export async function currentExportPeriod(): Promise<{
   from: string;

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/server/auth/guards";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { exportExpensesCsv } from "@/server/services/export.service";
-import { currentExportPeriod } from "@/server/services/export-period";
+import { resolveDateRange } from "@/lib/date-range";
 import { logAudit } from "@/server/services/audit.service";
 import { AppError } from "@/lib/errors";
 import { statusForCode } from "@/lib/result";
@@ -22,13 +22,19 @@ export async function GET(request: Request) {
     const status = (searchParams.get("status") as "active" | "reversed" | "all" | null) ?? "active";
     const accountId = searchParams.get("accountId") ?? undefined;
 
-    const period = await currentExportPeriod();
+    // Same window the screen resolves from the same params: all time unless
+    // ?from/?to narrow it. Reading the app-wide month cookie here would put
+    // FEWER rows in the file than the list was showing.
+    const dateRange = resolveDateRange(
+      searchParams.get("from") ?? undefined,
+      searchParams.get("to") ?? undefined
+    );
     const csv = await exportExpensesCsv({
       category,
       status,
       ...(accountId ? { accountId } : {}),
-      spentFrom: period.startUTC,
-      spentTo: period.endUTC,
+      ...(dateRange.startUTC ? { spentFrom: dateRange.startUTC } : {}),
+      ...(dateRange.endUTC ? { spentTo: dateRange.endUTC } : {}),
     });
 
     await logAudit({
