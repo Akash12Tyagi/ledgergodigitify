@@ -8,7 +8,11 @@ import type { AuditLogRow } from "@/types/audit-log";
 export const auditColumns: ColumnDef<AuditLogRow, unknown>[] = [
   {
     id: "createdAt",
-    header: "When",
+    header: "When (IST)",
+    // Pinned to Asia/Kolkata rather than the viewer's locale: every date in
+    // this app means IST, and without the explicit zone the server rendered
+    // this in UTC and the browser re-rendered it locally — a hydration
+    // mismatch that also quietly showed two different times for one event.
     cell: ({ row }) =>
       new Date(row.original.createdAt).toLocaleString("en-IN", {
         day: "2-digit",
@@ -16,6 +20,7 @@ export const auditColumns: ColumnDef<AuditLogRow, unknown>[] = [
         year: "numeric",
         hour: "2-digit",
         minute: "2-digit",
+        timeZone: "Asia/Kolkata",
       }),
   },
   { id: "actor", header: "Actor", cell: ({ row }) => row.original.actorName },

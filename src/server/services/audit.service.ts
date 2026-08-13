@@ -46,6 +46,7 @@ export async function listAuditLogs(filter: AuditLogListFilter) {
   const items: AuditLogRow[] = rows.map((r) => ({
     id: r._id.toString(),
     actorName: r.actorName,
+    actorUserId: r.actorUserId.toString(),
     action: r.action,
     entityKind: r.entity?.kind as AuditEntityKind,
     entityId: r.entity?.id ? r.entity.id.toString() : null,
@@ -53,6 +54,8 @@ export async function listAuditLogs(filter: AuditLogListFilter) {
     after: toPlainJson(r.after),
     summary: r.summary,
     createdAt: r.createdAt.toISOString(),
+    ip: r.ip ?? null,
+    userAgent: r.userAgent ?? null,
   }));
   return { rows: items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
 }
