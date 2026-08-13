@@ -12,17 +12,9 @@ import {
   DATE_FROM_PARAM,
   DATE_PRESETS,
   DATE_TO_PARAM,
+  formatISODateDisplay,
   toISODateIST,
 } from "@/lib/date-range";
-
-function formatDisplay(iso: string): string {
-  return new Date(`${iso}T00:00:00.000+05:30`).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
 
 /**
  * Exact From–To dates for a list view, written to the query string.
@@ -84,7 +76,9 @@ export function DateRangeFilter({
     });
   }
 
-  const label = isExact ? `${formatDisplay(from!)} – ${formatDisplay(to!)}` : fallbackLabel;
+  const label = isExact
+    ? `${formatISODateDisplay(from!)} – ${formatISODateDisplay(to!)}`
+    : fallbackLabel;
 
   return (
     <div className="flex items-center gap-1">

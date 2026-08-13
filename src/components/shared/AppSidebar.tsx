@@ -158,7 +158,9 @@ export function AppSidebar({
       </aside>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="flex flex-col gap-0 p-0 md:hidden">
+        {/* The nav does its own scrolling, so the sheet body only has to
+            stop adding gaps between the header and it. */}
+        <SheetContent side="left" className="p-0 md:hidden" bodyClassName="gap-0">
           <div className="flex h-14 shrink-0 items-center px-3">
             <SheetTitle className="truncate text-sm font-semibold">Finance &amp; Ledger</SheetTitle>
           </div>

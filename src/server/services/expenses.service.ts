@@ -5,6 +5,7 @@ import { withDbTransaction } from "@/lib/db-transaction";
 import { runWithIdempotency } from "@/lib/idempotency";
 import { isAfterTodayIST, toMonthKey, todayIST } from "@/lib/dates";
 import { formatPeriodLabel } from "@/lib/billing-period";
+import { toOutsideWindowSummary } from "@/lib/date-range";
 import { formatINR } from "@/lib/money";
 import { stampAttachments } from "@/lib/attachments";
 import type { ExpenseStatus } from "@/constants/domain";
@@ -22,6 +23,7 @@ import {
   markExpenseApproved,
   markExpenseReversed,
   markPendingExpenseCancelled,
+  summariseExpensesOutsideWindow,
   updatePendingExpenseOptimistic,
   type ExpenseListFilter,
 } from "@/server/repositories/expenses.repository";
@@ -70,7 +72,22 @@ export async function listExpenses(filter: ExpenseListFilter) {
     version: r.version,
   }));
 
-  return { rows: items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
+  // Only when the window found nothing: an empty table has to be able to
+  // tell "none recorded" from "none in these dates", which is exactly what
+  // an expense backdated outside the viewed period looks like.
+  const outsideWindow =
+    total === 0 && (filter.spentFrom || filter.spentTo)
+      ? toOutsideWindowSummary(await summariseExpensesOutsideWindow(filter))
+      : null;
+
+  return {
+    rows: items,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.ceil(total / pageSize),
+    outsideWindow,
+  };
 }
 
 // Section 6.3 — createExpense.

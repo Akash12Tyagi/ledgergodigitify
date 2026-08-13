@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCredit, reverseCredit } from "@/server/services/credits.service";
+import { createCredit, listCredits, reverseCredit } from "@/server/services/credits.service";
 import { AccountModel } from "@/database/models/account.model";
 import { CreditModel } from "@/database/models/credit.model";
 import { AuditLogModel } from "@/database/models/audit-log.model";
@@ -67,6 +67,83 @@ describe("credits.service — createCredit (Section 6.4)", () => {
 
     const updatedAccount = await AccountModel.findById(account._id).lean();
     expect(updatedAccount?.currentBalancePaise).toBe(2_000_00);
+  });
+});
+
+describe("credits.service — listCredits date window", () => {
+  afterEach(async () => {
+    await clearAllCollections();
+  });
+
+  async function seedCreditOn(receivedAt: Date) {
+    const staff = await seedUser({
+      name: "Staff",
+      email: `credlist-${randomUUID()}@example.com`,
+      password: PASSWORD,
+      role: "staff",
+    });
+    const account = await seedAccount({ openingBalancePaise: 0, currentBalancePaise: 0 });
+    await createCredit(
+      {
+        amountPaise: 19_000_00,
+        source: "Previous payment",
+        reason: "Backdated settlement",
+        category: "other",
+        accountId: account._id.toString(),
+        receivedAt,
+        idempotencyKey: randomUUID(),
+      },
+      actorFrom(staff)
+    );
+  }
+
+  // The reported bug: a credit recorded today but DATED outside the viewed
+  // period disappeared behind "No credits yet", which is what a failed save
+  // looks like too. The list now hands the empty state enough to say where
+  // the row actually went.
+  it("reports what the window hid when the window matches nothing", async () => {
+    await seedCreditOn(new Date("2026-04-22T18:30:00.000Z")); // 23 Apr 2026 IST
+
+    const result = await listCredits({
+      status: "active",
+      receivedFrom: new Date("2026-07-31T18:30:00.000Z"), // August 2026 IST
+      receivedTo: new Date("2026-08-31T18:30:00.000Z"),
+    });
+
+    expect(result.total).toBe(0);
+    expect(result.outsideWindow).toEqual({ total: 1, earliest: "2026-04-23", latest: "2026-04-23" });
+  });
+
+  it("leaves it null when the window has rows, and when there are none at all", async () => {
+    const emptyDb = await listCredits({
+      status: "active",
+      receivedFrom: new Date("2026-07-31T18:30:00.000Z"),
+      receivedTo: new Date("2026-08-31T18:30:00.000Z"),
+    });
+    expect(emptyDb.outsideWindow).toBeNull();
+
+    await seedCreditOn(new Date("2026-08-09T18:30:00.000Z")); // 10 Aug 2026 IST
+    const inWindow = await listCredits({
+      status: "active",
+      receivedFrom: new Date("2026-07-31T18:30:00.000Z"),
+      receivedTo: new Date("2026-08-31T18:30:00.000Z"),
+    });
+    expect(inWindow.total).toBe(1);
+    expect(inWindow.outsideWindow).toBeNull();
+  });
+
+  it("respects the non-date filters — a reversed credit is not what an active list is missing", async () => {
+    await seedCreditOn(new Date("2026-04-22T18:30:00.000Z"));
+    const credit = await CreditModel.findOne({}).lean();
+    await CreditModel.updateOne({ _id: credit!._id }, { $set: { status: "reversed" } });
+
+    const result = await listCredits({
+      status: "active",
+      receivedFrom: new Date("2026-07-31T18:30:00.000Z"),
+      receivedTo: new Date("2026-08-31T18:30:00.000Z"),
+    });
+
+    expect(result.outsideWindow).toBeNull();
   });
 });
 

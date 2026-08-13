@@ -17,6 +17,7 @@ import {
   findCreditsPaginated,
   insertCredit,
   markCreditReversed,
+  summariseCreditsOutsideWindow,
   type CreditListFilter,
 } from "@/server/repositories/credits.repository";
 
@@ -26,6 +27,7 @@ import { logAudit } from "@/server/services/audit.service";
 import type { AuthedUser } from "@/server/auth/guards";
 import type { CreateCreditInput, ReverseCreditInput } from "@/schemas/credit.schema";
 import type { CreditRow } from "@/types/credit";
+import { toOutsideWindowSummary } from "@/lib/date-range";
 
 export type { CreditRow };
 
@@ -50,7 +52,22 @@ export async function listCredits(filter: CreditListFilter) {
     reversedReason: r.reversedReason ?? null,
   }));
 
-  return { rows: items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
+  // Only when the window found nothing: an empty table has to be able to
+  // tell "none recorded" from "none in these dates", which is exactly what
+  // a credit backdated outside the viewed period looks like.
+  const outsideWindow =
+    total === 0 && (filter.receivedFrom || filter.receivedTo)
+      ? toOutsideWindowSummary(await summariseCreditsOutsideWindow(filter))
+      : null;
+
+  return {
+    rows: items,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.ceil(total / pageSize),
+    outsideWindow,
+  };
 }
 
 // Section 6.4 — createCredit (mirror of createExpense, direction IN — no

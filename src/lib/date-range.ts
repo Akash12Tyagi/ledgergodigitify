@@ -1,4 +1,5 @@
 import { monthRangeToUtc, nowIST, shiftMonthKey, startOfDayIST, toMonthKey } from "@/lib/dates";
+import type { OutsideWindowSummary } from "@/types/list";
 
 /**
  * Exact-date filtering for LIST views (expenses, credits) — distinct from
@@ -37,6 +38,30 @@ export function toISODateIST(d: Date): string {
   const month = String(ist.getUTCMonth() + 1).padStart(2, "0");
   const day = String(ist.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+/** "23 Apr 2026" for an IST "YYYY-MM-DD" — the display form shared by the
+ * range picker's trigger and the empty states that have to name a range. */
+export function formatISODateDisplay(isoDate: string): string {
+  return new Date(`${isoDate}T00:00:00.000+05:30`).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+/** A repository's $min/$max instants → the IST dates the empty state names
+ * and jumps to. Shared by every list that reports what its window hid. */
+export function toOutsideWindowSummary(
+  summary: { total: number; earliest: Date; latest: Date } | null
+): OutsideWindowSummary | null {
+  if (!summary) return null;
+  return {
+    total: summary.total,
+    earliest: toISODateIST(summary.earliest),
+    latest: toISODateIST(summary.latest),
+  };
 }
 
 export type ResolvedDateRange = {

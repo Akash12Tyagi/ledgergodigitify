@@ -38,6 +38,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
 
 function SheetContent({
   className,
+  bodyClassName,
   children,
   side = "right",
   showCloseButton = true,
@@ -45,6 +46,11 @@ function SheetContent({
 }: SheetPrimitive.Popup.Props & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  /** Styles the scrollable body wrapping `children`. Reach for this rather
+   * than `className` when adjusting the CONTENT's layout — `className`
+   * styles the fixed panel, which must stay a non-scrolling flex column so
+   * the close button has something to pin itself to. */
+  bodyClassName?: string
 }) {
   return (
     <SheetPortal>
@@ -53,19 +59,41 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition duration-200 ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-3/4 data-[side=left]:border-r data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-3/4 data-[side=right]:border-l data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
+          "fixed z-50 flex flex-col overflow-hidden bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition duration-200 ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:max-h-[85svh] data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:border-r data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:border-l data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:max-h-[85svh] data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem]",
+          // A phone has no room for the old 3/4 inset — it squeezed these
+          // forms into ~270px, which is where the labels and date inputs
+          // started clipping. Near-full width below `sm:`, keeping a strip
+          // of backdrop to tap for dismissal, then the fixed panel width
+          // once the viewport can spare it.
+          "data-[side=left]:w-[calc(100%-3rem)] data-[side=right]:w-[calc(100%-3rem)] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
           className
         )}
         {...props}
       >
-        {children}
+        {/* These sheets carry long forms, and the page behind is scroll-
+            locked while one is open — so without a scroll container of its
+            own, everything past the fold is simply unreachable. `min-h-0`
+            is what lets this shrink inside the flex column instead of
+            growing past the panel. */}
+        <div
+          data-slot="sheet-body"
+          className={cn(
+            "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain",
+            bodyClassName
+          )}
+        >
+          {children}
+        </div>
         {showCloseButton && (
           <SheetPrimitive.Close
             data-slot="sheet-close"
             render={
               <Button
                 variant="ghost"
-                className="absolute top-3 right-3"
+                // Outside the scrolling body on purpose: it stays reachable
+                // at the top of a long form. `bg-popover` keeps content
+                // legible as it scrolls underneath.
+                className="absolute top-3 right-3 bg-popover"
                 size="icon-sm"
               />
             }

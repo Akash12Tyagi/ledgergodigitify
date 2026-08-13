@@ -84,22 +84,56 @@ export type CreditListFilter = {
   pageSize?: number;
 };
 
-/** Section 7.9 — /ledger/credits table, server-paginated. */
-export async function findCreditsPaginated(filter: CreditListFilter) {
-  await db();
-  const page = filter.page ?? 1;
-  const pageSize = filter.pageSize ?? 20;
+/** Shared by the list query and the outside-the-window summary, so the two
+ * can never drift into disagreeing about which rows the non-date filters
+ * select. */
+function buildCreditMatch(
+  filter: CreditListFilter,
+  options: { withDateWindow: boolean }
+): Record<string, unknown> {
   const match: Record<string, unknown> = {};
   if (filter.category && filter.category !== "all") match.category = filter.category;
   if (filter.accountId) match.accountId = new Types.ObjectId(filter.accountId);
   if (!filter.status || filter.status === "active") match.status = "active";
   else if (filter.status === "reversed") match.status = "reversed";
-  if (filter.receivedFrom || filter.receivedTo) {
+  if (options.withDateWindow && (filter.receivedFrom || filter.receivedTo)) {
     const window: Record<string, Date> = {};
     if (filter.receivedFrom) window.$gte = filter.receivedFrom;
     if (filter.receivedTo) window.$lt = filter.receivedTo;
     match.receivedAt = window;
   }
+  return match;
+}
+
+/**
+ * Count and date-bounds of the credits the same filters would select with
+ * the date window lifted. One aggregation, run only when the windowed query
+ * found nothing — see types/list.ts#OutsideWindowSummary for why an empty
+ * table needs to know this.
+ */
+export async function summariseCreditsOutsideWindow(filter: CreditListFilter) {
+  await db();
+  const [summary] = await CreditModel.aggregate<{ total: number; earliest: Date; latest: Date }>([
+    { $match: buildCreditMatch(filter, { withDateWindow: false }) },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        earliest: { $min: "$receivedAt" },
+        latest: { $max: "$receivedAt" },
+      },
+    },
+  ]);
+  if (!summary || summary.total === 0) return null;
+  return summary;
+}
+
+/** Section 7.9 — /ledger/credits table, server-paginated. */
+export async function findCreditsPaginated(filter: CreditListFilter) {
+  await db();
+  const page = filter.page ?? 1;
+  const pageSize = filter.pageSize ?? 20;
+  const match = buildCreditMatch(filter, { withDateWindow: true });
 
   const [rows, total] = await Promise.all([
     CreditModel.find(match)

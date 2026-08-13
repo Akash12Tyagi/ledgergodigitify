@@ -7,7 +7,7 @@ import { getPendingExpenseCount, listExpenses } from "@/server/services/expenses
 import { requireUser } from "@/server/auth/guards";
 import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
 import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
-import { resolveDateRange } from "@/lib/date-range";
+import { formatISODateDisplay, resolveDateRange } from "@/lib/date-range";
 import { DateRangeFilter } from "@/components/shared/DateRangeFilter";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import type { ExpenseCategory, ExpenseStatus } from "@/constants/domain";
@@ -58,6 +58,14 @@ export default async function ExpensesPage({
     getPendingExpenseCount(),
   ]);
 
+  // The picker's own wording, reused by the empty state so the two name the
+  // same span identically.
+  const periodLabel =
+    from === to ? formatMonthLabel(to) : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`;
+  const rangeLabel = dateRange.isExact
+    ? `${formatISODateDisplay(dateRange.from!)} – ${formatISODateDisplay(dateRange.to!)}`
+    : periodLabel;
+
   return (
     <div>
       <PageHeader
@@ -74,15 +82,7 @@ export default async function ExpensesPage({
         // month period those screens are on, so the two never disagree
         // silently.
         action={
-          <DateRangeFilter
-            from={dateRange.from}
-            to={dateRange.to}
-            fallbackLabel={
-              from === to
-                ? formatMonthLabel(to)
-                : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`
-            }
-          />
+          <DateRangeFilter from={dateRange.from} to={dateRange.to} fallbackLabel={periodLabel} />
         }
       />
       <ExpensesTableView
@@ -92,6 +92,8 @@ export default async function ExpensesPage({
         pageSize={result.pageSize}
         role={actor.role}
         pendingCount={pendingCount}
+        rangeLabel={rangeLabel}
+        outsideWindow={result.outsideWindow}
       />
     </div>
   );

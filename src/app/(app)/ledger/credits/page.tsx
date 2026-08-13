@@ -8,7 +8,7 @@ import { listCredits } from "@/server/services/credits.service";
 import { requireUser } from "@/server/auth/guards";
 import { PERIOD_FROM_COOKIE, PERIOD_TO_COOKIE, resolvePeriodRange } from "@/lib/period-range-context";
 import { formatMonthLabel, nowIST, toMonthKey } from "@/lib/dates";
-import { resolveDateRange } from "@/lib/date-range";
+import { formatISODateDisplay, resolveDateRange } from "@/lib/date-range";
 import { PAGE_SIZE_DEFAULT } from "@/constants/finance";
 import type { CreditCategory } from "@/constants/domain";
 
@@ -50,21 +50,21 @@ export default async function CreditsPage({
     receivedTo: dateRange.endUTC,
   });
 
+  // The picker's own wording, reused by the empty state so the two name the
+  // same span identically.
+  const periodLabel =
+    from === to ? formatMonthLabel(to) : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`;
+  const rangeLabel = dateRange.isExact
+    ? `${formatISODateDisplay(dateRange.from!)} – ${formatISODateDisplay(dateRange.to!)}`
+    : periodLabel;
+
   return (
     <div>
       <PageHeader
         title="Credits"
         description="Money in that did not come from a client invoice — owner capital, loans, refunds, interest."
         action={
-          <DateRangeFilter
-            from={dateRange.from}
-            to={dateRange.to}
-            fallbackLabel={
-              from === to
-                ? formatMonthLabel(to)
-                : `${formatMonthLabel(from)} – ${formatMonthLabel(to)}`
-            }
-          />
+          <DateRangeFilter from={dateRange.from} to={dateRange.to} fallbackLabel={periodLabel} />
         }
       />
       <CreditsTableView
@@ -73,6 +73,8 @@ export default async function CreditsPage({
         page={result.page}
         pageSize={result.pageSize}
         role={actor.role}
+        rangeLabel={rangeLabel}
+        outsideWindow={result.outsideWindow}
       />
     </div>
   );

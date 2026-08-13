@@ -5,10 +5,12 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable } from "@/components/shared/DataTable";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { OutsideWindowEmptyState } from "@/components/shared/OutsideWindowEmptyState";
 import { CreateCreditSheet } from "@/features/credits/components/CreateCreditSheet";
 import { buildCreditsColumns } from "@/features/credits/components/credits-columns";
 import { CREDIT_CATEGORIES } from "@/constants/domain";
 import type { CreditRow } from "@/types/credit";
+import type { OutsideWindowSummary } from "@/types/list";
 import type { UserRole } from "@/constants/roles";
 
 export function CreditsTableView({
@@ -17,12 +19,18 @@ export function CreditsTableView({
   page,
   pageSize,
   role,
+  rangeLabel,
+  outsideWindow,
 }: {
   rows: CreditRow[];
   total: number;
   page: number;
   pageSize: number;
   role: UserRole;
+  /** The span this list is scoped to, for the empty state to name. */
+  rangeLabel: string;
+  /** Set only when the range hid every row — see OutsideWindowEmptyState. */
+  outsideWindow: OutsideWindowSummary | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -73,7 +81,18 @@ export function CreditsTableView({
         total={total}
         page={page}
         pageSize={pageSize}
-        emptyState={<EmptyState title="No credits yet" description="Record your first credit to see it here." />}
+        emptyState={
+          outsideWindow ? (
+            <OutsideWindowEmptyState
+              summary={outsideWindow}
+              rangeLabel={rangeLabel}
+              noun="credit"
+              nounPlural="credits"
+            />
+          ) : (
+            <EmptyState title="No credits yet" description="Record your first credit to see it here." />
+          )
+        }
       />
     </div>
   );

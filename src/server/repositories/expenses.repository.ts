@@ -202,12 +202,13 @@ export type ExpenseListFilter = {
   pageSize?: number;
 };
 
-/** Section 7.6 — /ledger/expenses table, server-paginated (Section 14
- * edge case 33: no full-collection fetch). */
-export async function findExpensesPaginated(filter: ExpenseListFilter) {
-  await db();
-  const page = filter.page ?? 1;
-  const pageSize = filter.pageSize ?? 20;
+/** Shared by the list query and the outside-the-window summary, so the two
+ * can never drift into disagreeing about which rows the non-date filters
+ * select. */
+function buildExpenseMatch(
+  filter: ExpenseListFilter,
+  options: { withDateWindow: boolean }
+): Record<string, unknown> {
   const match: Record<string, unknown> = {};
   if (filter.category && filter.category !== "all") match.category = filter.category;
   if (filter.accountId) match.accountId = new Types.ObjectId(filter.accountId);
@@ -216,12 +217,45 @@ export async function findExpensesPaginated(filter: ExpenseListFilter) {
   if (filter.templateId && Types.ObjectId.isValid(filter.templateId)) {
     match.templateId = new Types.ObjectId(filter.templateId);
   }
-  if (filter.spentFrom || filter.spentTo) {
+  if (options.withDateWindow && (filter.spentFrom || filter.spentTo)) {
     const window: Record<string, Date> = {};
     if (filter.spentFrom) window.$gte = filter.spentFrom;
     if (filter.spentTo) window.$lt = filter.spentTo;
     match.spentAt = window;
   }
+  return match;
+}
+
+/**
+ * Count and date-bounds of the expenses the same filters would select with
+ * the date window lifted. One aggregation, run only when the windowed query
+ * found nothing — see types/list.ts#OutsideWindowSummary for why an empty
+ * table needs to know this.
+ */
+export async function summariseExpensesOutsideWindow(filter: ExpenseListFilter) {
+  await db();
+  const [summary] = await ExpenseModel.aggregate<{ total: number; earliest: Date; latest: Date }>([
+    { $match: buildExpenseMatch(filter, { withDateWindow: false }) },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        earliest: { $min: "$spentAt" },
+        latest: { $max: "$spentAt" },
+      },
+    },
+  ]);
+  if (!summary || summary.total === 0) return null;
+  return summary;
+}
+
+/** Section 7.6 — /ledger/expenses table, server-paginated (Section 14
+ * edge case 33: no full-collection fetch). */
+export async function findExpensesPaginated(filter: ExpenseListFilter) {
+  await db();
+  const page = filter.page ?? 1;
+  const pageSize = filter.pageSize ?? 20;
+  const match = buildExpenseMatch(filter, { withDateWindow: true });
 
   const [rows, total] = await Promise.all([
     ExpenseModel.find(match)

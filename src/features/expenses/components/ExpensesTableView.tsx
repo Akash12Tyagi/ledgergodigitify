@@ -6,10 +6,12 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable } from "@/components/shared/DataTable";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { OutsideWindowEmptyState } from "@/components/shared/OutsideWindowEmptyState";
 import { CreateExpenseSheet } from "@/features/expenses/components/CreateExpenseSheet";
 import { buildExpensesColumns } from "@/features/expenses/components/expenses-columns";
 import { EXPENSE_CATEGORIES } from "@/constants/domain";
 import type { ExpenseRow } from "@/types/expense";
+import type { OutsideWindowSummary } from "@/types/list";
 import type { UserRole } from "@/constants/roles";
 
 export function ExpensesTableView({
@@ -19,6 +21,8 @@ export function ExpensesTableView({
   pageSize,
   role,
   pendingCount = 0,
+  rangeLabel,
+  outsideWindow,
 }: {
   rows: ExpenseRow[];
   total: number;
@@ -27,6 +31,10 @@ export function ExpensesTableView({
   role: UserRole;
   /** Total awaiting approval, across every period — not just this page. */
   pendingCount?: number;
+  /** The span this list is scoped to, for the empty state to name. */
+  rangeLabel: string;
+  /** Set only when the range hid every row — see OutsideWindowEmptyState. */
+  outsideWindow: OutsideWindowSummary | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -109,7 +117,18 @@ export function ExpensesTableView({
         total={total}
         page={page}
         pageSize={pageSize}
-        emptyState={<EmptyState title="No expenses yet" description="Record your first expense to see it here." />}
+        emptyState={
+          outsideWindow ? (
+            <OutsideWindowEmptyState
+              summary={outsideWindow}
+              rangeLabel={rangeLabel}
+              noun="expense"
+              nounPlural="expenses"
+            />
+          ) : (
+            <EmptyState title="No expenses yet" description="Record your first expense to see it here." />
+          )
+        }
       />
     </div>
   );
