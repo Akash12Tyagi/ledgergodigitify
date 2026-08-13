@@ -150,8 +150,80 @@ Run: `npx tsx scripts/smoke-prod.ts https://<domain> <owner-email> <owner-passwo
 
 ## 7. Backup / restore
 
-- Atlas provides continuous backups on paid tiers — confirm the backup
-  policy/retention window during H1 setup, not after an incident.
+### Where we actually stand
+
+Atlas provides continuous backups **on paid tiers only**. On the free M0
+tier there are none at all — no snapshots, no point-in-time recovery. Until
+the cluster is upgraded, the full-backup file below is the *entire* disaster
+recovery story, and it is only as fresh as the last time somebody clicked
+the button.
+
+M0 also caps storage at 512 MB and pauses a cluster after 60 days idle.
+
+### Taking a backup
+
+Settings → **Full backup** → *Download full backup (.xlsx)*. Owner only,
+and every download is written to the audit log.
+
+One sheet per collection, with MongoDB `_id`s and every reference intact.
+Each sheet carries readable columns for humans plus a `__json` column
+holding canonical Extended JSON — that column is what the restore reads, and
+it is why an ObjectId stays an ObjectId and an int stays an int through a
+format that would otherwise turn `6031…` into `6.031e+23`. The `_manifest`
+sheet holds per-collection document counts and SHA-256 checksums.
+
+**The file contains password hashes and every financial record. It is as
+sensitive as the database itself** — keep it encrypted, and never in a
+folder that syncs somewhere by accident.
+
+Rough cadence, given no automation exists yet: after any day with real data
+entry, and always before a deploy that touches the schema. Keep at least one
+copy off the machine that made it (pen drive, separate cloud account).
+
+### Restore drill — do this on every backup you keep
+
+```
+npm run restore-from-xlsx -- --file <backup.xlsx> --verify-only
+```
+
+Touches no database. Reads the file, re-checksums every sheet against the
+manifest, and parses all documents. A backup that has never been verified is
+not a backup, it is a hope.
+
+### Restoring for real
+
+```
+npm run restore-from-xlsx -- --file <backup.xlsx> --uri <target mongodb uri>
+```
+
+`--uri` is required and is **never** defaulted from `.env`, because
+restoring over a live database is the one mistake this tool cannot undo. Add
+`--force` only when you intend to DROP the target's existing collections.
+
+The script refuses to continue at the first failure, in order:
+
+1. format version is one this build understands
+2. every sheet's checksum matches the manifest
+3. the connection actually landed on the database `--uri` named
+4. the target is empty (or `--force` was passed)
+5. indexes rebuilt — including the unique `idempotencyKey` ones that are the
+   only thing preventing duplicate money
+6. **reconciliation passes** — every account's derived balance equals its
+   stored balance. A restore that leaves drift is not a restore, and the
+   script exits non-zero.
+
+### Known gaps
+
+- **Attachments are not in this file.** Receipts live in Cloudinary; the
+  backup holds their metadata and URLs, not the bytes. Cloudinary retention
+  is a separate concern.
+- **Manual, not scheduled.** Nobody is reminded to click the button.
+- **No immutability.** A copy on a laptop or in a synced folder can be
+  encrypted by ransomware along with everything else. An unplugged pen drive
+  is the cheapest fix available today; object-lock storage is the real one.
+
+### Drill log
+
 - `[TO FILL]` — restore drill performed on `[date]`, restore point
   verified against `/ledger/overview`'s closing position (Section 17.5.3
   sign-off check).
